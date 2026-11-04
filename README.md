@@ -1,6 +1,6 @@
 # opentracker-synths
 
-Synth engine modules for [OpenTracker](../ReversedPolytracker) 3.x, the open-source firmware
+Synth engine modules for [OpenTracker](https://github.com/sandlbn/polyend-tracker-re) 3.x, the open-source firmware
 for the original Polyend Tracker. The engines are inspired by the Tracker Mini's synths but are
 not identical to them.
 
@@ -12,7 +12,7 @@ not identical to them.
 | `modules/perc` | PRC1 | PERC (drum machine, one drum per note) |
 | `modules/wtfm` | WTF1 | WTFM (2-operator wavetable FM, three feedback paths) |
 | `modules/fm4` | FM4S | FM4: four-operator FM, 8 algorithms, feedback, 5-stage envelopes per operator (module engine 0x80, Patches/FM4/) |
-| `modules/ju6` | JU6S | JU6: Juno-style poly voice: one DCO (polyBLEP saw, PWM pulse, sub, noise), 4-position HPF, resonant 24 dB VCF, ADSR, delayed LFO, the built-in chorus Off / I / II once per slot (module engine 0x81, Patches/JU6/) |
+| `modules/ju6` | JU6S | JU6: one-DCO poly voice: one DCO (polyBLEP saw, PWM pulse, sub, noise), 4-position HPF, resonant 24 dB VCF, ADSR, delayed LFO, the built-in chorus Off / I / II once per slot (module engine 0x81, Patches/JU6/) |
 | `modules/dtype` | DTY1 | D-Type ("D-Type" on screen): three-oscillator mono synth: 3 VCOs (6 waves, Lo..2', VCO 3 off the keyboard as an LFO), white / pink noise, mixer feedback, 4-pole ladder to self-oscillation, two ADS contours with a Decay switch, glide, Mod Mix (VCO 3 .. noise) into the VCOs and the filter by the Wheel (module engine 0x82, Patches/DTYPE/) |
 | `modules/cstype` | CST1 | CS-Type ("CS-Type" on screen): two-layer polysynth: per note two layers, each saw + pulse (own PWM LFO), sine, noise, resonant 12 dB HPF and LPF (IL / AL contour), own ADSR VCA; Brilliance, Resonance, II Detune, ring modulator with sweep, sub-osc LFO, Touch (macro), Ribbon (macro), glide (module engine 0x83, Patches/CSTYPE/) |
 | `modules/atype` | ATY1 | A-Type ("A-Type" on screen): duophonic two-oscillator synth: 2 VCOs (saw / pulse with PWM, hard sync), noise or ring modulator, sample & hold, HPF, 4-pole ladder or 2-pole SVF, ADSR and AR, LFO, glide; Keyboard Duo and Priority Last / Low / High at Poly 1 through the core's note priority (module engine 0x84, Patches/ATYPE/) |

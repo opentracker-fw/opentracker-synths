@@ -1,4 +1,4 @@
-// JU6 Juno-style poly engine (see ju6.h).
+// JU6 one-DCO poly engine (see ju6.h).
 //
 // Per sample: the DCO phase advances; the saw, the pulse (both edges) and the
 // sub square (it flips at every DCO wrap) get a polyBLEP correction near
@@ -12,7 +12,7 @@
 // slot (as on the instrument); the Delay fades it in per voice from its note
 // on. PWM in LFO mode follows the LFO without the delay.
 // The chorus runs once per slot on the voices' sum (slotPost): the shared BBD
-// chorus at the Juno's fixed settings (Mix 100, Width 100, Tone ~8.5 kHz),
+// chorus at the original's fixed settings (Mix 100, Width 100, Tone ~8.5 kHz),
 // each slot with its own line; Off leaves the bus untouched.
 #include "ju6.h"
 
@@ -344,7 +344,7 @@ public:
         r.dpw = (pw1 - pw0) * n;
         // VCF cutoff: Env (velocity-scaled), LFO, key follow around C4.
         const float envOct = S.envOct * (1.0f - S.velAmt * (1.0f - V.vel));
-        const float keyOct = S.key * (V.pitch - 60.0f);
+        const float keyOct = S.key * (V.pitch - 60.0f) + v.cutoffOct;   // + Performance (#23)
         auto stageGain = [&S](float oct) {
             const float hz = clampf(S.cutoff * fastExp2(oct), 8.0f, 0.45f * kSampleRate);
             const float t = tanPade(kPi * hz * kInvFs);

@@ -530,7 +530,7 @@ public:
         glideTo(V.pitch, V.target, V.glide ? S.glideC : 0.0f);
         V.fenv *= S.envDecC;
         if (V.fenv < 1.0e-6f) V.fenv = 0.0f;
-        const float g1 = svfG(S.cutoff, S.key * (V.pitch + v.bend - 60.0f) + S.envOct * V.fenv);
+        const float g1 = svfG(S.cutoff, S.key * (V.pitch + v.bend - 60.0f) + S.envOct * V.fenv + v.cutoffOct);   // + Performance (#23)
         const float gs = V.gset ? V.lastG : g1;
         if (!V.gset) V.h = svfH(gs, S.k1);
         V.lastG = g1;

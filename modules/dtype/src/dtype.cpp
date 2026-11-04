@@ -522,8 +522,9 @@ public:
         }
         for (int j = 0; j < 5; ++j) lv[j] = {S.lv0[j], (S.lv1[j] - S.lv0[j]) * n};
         // Ladder: cutoff x Contour x Key Track (around C4) x Filter Mod.
-        const float G1 = stageGain(S.cutoff, S.contourOct * V.fenv + S.key * (key1 - 60.0f) + S.fmOct * V.mod);
-        const float G0 = V.set ? V.G : stageGain(S.cutoff, S.contourOct * fe0 + S.key * (key0 - 60.0f) + S.fmOct * V.mod);
+        // + the Performance offset (#23).
+        const float G1 = stageGain(S.cutoff, S.contourOct * V.fenv + S.key * (key1 - 60.0f) + S.fmOct * V.mod + v.cutoffOct);
+        const float G0 = V.set ? V.G : stageGain(S.cutoff, S.contourOct * fe0 + S.key * (key0 - 60.0f) + S.fmOct * V.mod + v.cutoffOct);
         const float k0 = V.set ? V.k : S.k, k1 = S.k;
         V.G = G1;
         V.k = k1;

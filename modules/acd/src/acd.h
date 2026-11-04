@@ -1,5 +1,5 @@
 // ACD synth engine (2.x WP-F, docs/MINI_PLAN.md §3; spec 21 §8.2 parameter
-// table; Tracker Mini manual p.146, p.154) [OT clean-room DSP].
+// table; Tracker Mini manual p.146, p.154) [OT DSP].
 //
 // A single-oscillator mono/poly "acid" voice:
 //   oscillator  saw + pulse (PW, PW LFO, PW Env) + sub (-1 / -2 oct square,

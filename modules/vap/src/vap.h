@@ -1,7 +1,7 @@
 // VAP: virtual analog poly synth engine (Tracker Mini engine id 4; spec 21
 // §8.4 with the MINI_PLAN corrections, Mini manual p.157-160) [OT].
 //
-// Clean-room DSP of our own design that follows the VAP parameter set
+// DSP of our own design that follows the VAP parameter set
 // (docs/OPTIMIZATION_2X.md item 10 budget: <= 12k M4 cycles per voice per
 // block for the Init patch, <= 18k worst case, no oversampling, block-rate
 // modulation, no shared tables):

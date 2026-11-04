@@ -1,4 +1,4 @@
-// ACD synth engine (see acd.h) [OT clean-room DSP].
+// ACD synth engine (see acd.h) [OT DSP].
 //
 // Signal path per voice and block (all passes over one 128-frame buffer):
 //   1. control (block rate): Amp / Mod envelopes, LFO, glide, then the
@@ -552,7 +552,7 @@ OT_FASTRUN_FN bool AcdEngine::render(SynthVoice& v, const SynthParams& p, float 
     const float inc1 = clampf(exp2Fast((semis - 69.0f) * (1.0f / 12.0f)) * (440.0f / kSampleRate), 1.0e-7f, kMaxInc);
     const float duty1 = clampf(e1[kPw] + e1[kPwLfo] * lfo + e1[kPwEnv] * a.mod, 0.03f, 0.97f);
     // Filter coefficients at the block end.
-    const float oct = s.noteTrack * (pitch - 60.0f) + s.envOct * a.mod + s.lfoOct * lfo;
+    const float oct = s.noteTrack * (pitch - 60.0f) + s.envOct * a.mod + s.lfoOct * lfo + v.cutoffOct;   // + Performance (#23)
     const float fc = clampf(s.cutoff * exp2Fast(clampf(oct, -20.0f, 20.0f)), 16.0f, 0.45f * kSampleRate);
     const float g = tanPade(kPiF * fc * (1.0f / kSampleRate));
     float c1[6];

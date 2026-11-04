@@ -1,7 +1,7 @@
 // PERC drum machine engine (2.x WP-F; spec 21 §8.6 with the MINI_PLAN
 // corrections; Tracker Mini manual p.146, p.166-172) [OT].
 //
-// Clean-room design: only the parameter semantics follow the Mini (stored
+// Our own design: only the parameter semantics follow the Mini (stored
 // ranges, the drum per note, the mixer and FX block). Every DSP algorithm
 // here is our own and is an APPROXIMATION of the described sounds:
 //  - "Body Wave" 0..175 = 16 wave families x 11 positions (0 %, 10 %, ..

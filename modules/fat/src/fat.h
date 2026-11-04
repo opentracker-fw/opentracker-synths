@@ -1,7 +1,7 @@
 // FAT: unison "super saw" synth engine (Tracker Mini engine id 2; spec 21
 // §8.3 parameter table; docs/specs/2x-07-fat-engine.md) [OT].
 //
-// Clean-room DSP of our own design that follows the FAT parameter set
+// DSP of our own design that follows the FAT parameter set
 // (budget: <= 12k M4 instructions per voice per block for the Init patch,
 // <= 22k worst case, no oversampling, block-rate modulation, no tables):
 //

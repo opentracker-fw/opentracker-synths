@@ -440,10 +440,12 @@ public:
             r.gp = Y.pulse ? kDrive : 0.0f;
             r.sine = lin(Y.lv0[0], Y.lv1[0]);
             r.noise = lin(Y.lv0[1], Y.lv1[1]);
-            // Cutoffs: Brilliance (LPF x 2^(2 b), HPF x 2^b), the contour, the common offset.
-            const float lg1 = svfG(Y.lpHz, 2.0f * S.bril + kEnvOct * W.fenv + co1);
+            // Cutoffs: Brilliance (LPF x 2^(2 b), HPF x 2^b), the contour, the common
+            // offset; the LPF also takes the Performance offset (#23: the HPF stays,
+            // it runs only when the patch raises it).
+            const float lg1 = svfG(Y.lpHz, 2.0f * S.bril + kEnvOct * W.fenv + co1 + v.cutoffOct);
             const float hg1 = svfG(Y.hpHz, S.bril + co1 - kKeyOct * (key1 - 60.0f));
-            const float lg0 = V.set ? W.lpG : svfG(Y.lpHz, 2.0f * S.bril + kEnvOct * fe0 + co0);
+            const float lg0 = V.set ? W.lpG : svfG(Y.lpHz, 2.0f * S.bril + kEnvOct * fe0 + co0 + v.cutoffOct);
             const float hg0 = V.set ? W.hpG : svfG(Y.hpHz, S.bril + co0 - kKeyOct * (key0 - 60.0f));
             W.lpG = lg1;
             W.hpG = hg1;

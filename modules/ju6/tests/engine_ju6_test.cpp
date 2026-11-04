@@ -1,4 +1,4 @@
-// JU6 Juno-style poly engine (opentracker-synths modules/ju6, engine 0x81):
+// JU6 one-DCO poly engine (opentracker-synths modules/ju6, engine 0x81):
 // registered with a valid descriptor, silent when idle, the DCO at A 440,
 // polyBLEP aliasing below a naive saw, the HPF positions in order, the LPF
 // cutoff and resonance (self-oscillation at the top), the ADSR stages and the
@@ -1092,5 +1092,92 @@ TEST(ju6_chorus_tail_after_the_last_voice) {
     for (int b = 0; b < 5; ++b) {
         s.block();
         for (uint32_t i = 0; i < kBlock; ++i) CHECK(s.L[i] == 0.0f && s.R[i] == 0.0f);
+    }
+}
+
+// --- Performance filter offset (issue #23) ---------------------------------------------
+// SynthVoice::cutoffOct (octaves, filled by the framework from the track's
+// Performance filter) moves the JU6 cutoff: Cutoff x 2^offset, inside the
+// engine's own clamps. A patch at 1600 Hz shifted by -2 octaves sounds like
+// the same patch at 400 Hz; 0 leaves the render bit-identical.
+
+namespace {
+namespace perfcut {
+
+// One note (pitch 48, 40 blocks) from the Init patch with its cutoff set by
+// `cut(patch, hz)`, the voice's cutoffOct = `oct`.
+template <class Cut>
+std::vector<float> render(Cut cut, float hz, float oct) {
+    const int32_t engine = ju6::kEngineId;
+    ISynthEngine* e = synthEngineFor(engine);
+    SynthPatch patch;
+    patchInit(engine, &patch);
+    cut(patch, hz);
+    SynthParams p;
+    const uint8_t m[kSynthSeqMacros] = {};
+    p.engine = engine;
+    p.count = synthEffectiveParams(patch, m, 1.0f, p.end);
+    std::memcpy(p.start, p.end, sizeof(p.end));
+    p.serial = 1;
+    static SynthSlotScratch scratch;
+    static SynthVoice v;
+    scratch = SynthSlotScratch{};
+    e->slotReset(scratch);
+    v = SynthVoice{};
+    v.slotScratch = &scratch;
+    v.cutoffOct = oct;
+    SynthNote n;
+    n.pitch = 48.0f;
+    n.note = 48;
+    v.note = 48;
+    v.gate = true;
+    e->noteOn(v, p, n);
+    std::vector<float> out;
+    float L[kBlock], R[kBlock];
+    for (int b = 0; b < 40; ++b) {
+        for (uint32_t i = 0; i < kBlock; ++i) L[i] = R[i] = 0.0f;
+        e->prepare(scratch, p);
+        e->render(v, p, 1.0f, 0.0f, L, R);
+        out.insert(out.end(), L, L + kBlock);
+    }
+    return out;
+}
+
+double energy(const std::vector<float>& x) {
+    double s = 0;
+    for (float f : x) s += double(f) * f;
+    return s;
+}
+
+// Relative difference of two renders (0 = identical).
+double relDiff(const std::vector<float>& a, const std::vector<float>& b) {
+    double d = 0;
+    for (size_t i = 0; i < a.size(); ++i) d += double(a[i] - b[i]) * (a[i] - b[i]);
+    return std::sqrt(d / (energy(a) + 1e-30));
+}
+
+void cut(SynthPatch& p, float hz) {
+    CHECK(synthParamSet(p, ju6::kCutoff, hz));
+}
+
+}  // namespace perfcut
+}  // namespace
+
+TEST(ju6_perf_cutoff_offset_moves_the_cutoff) {
+    using namespace perfcut;
+    const std::vector<float> ref = render(cut, 400.0f, 0.0f);
+    CHECK(energy(ref) > 1e-6);
+    // The same cutoff reached by the offset: close to the plain render.
+    CHECK(relDiff(ref, render(cut, 1600.0f, -2.0f)) < 0.05);
+    CHECK(relDiff(render(cut, 6400.0f, 0.0f), render(cut, 400.0f, 4.0f)) < 0.05);
+    // The offset changes the sound, and 0 is the plain patch.
+    CHECK(relDiff(ref, render(cut, 400.0f, -3.0f)) > 0.1);
+    CHECK(relDiff(ref, render(cut, 400.0f, 0.0f)) == 0.0);
+    // The full range stays finite (the engine's own clamps).
+    for (float o : {-9.54f, 9.54f}) {
+        const std::vector<float> x = render(cut, o > 0 ? 20000.0f : 20.0f, o);
+        bool fin = true;
+        for (float f : x) fin = fin && std::isfinite(f);
+        CHECK(fin);
     }
 }

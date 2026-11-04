@@ -1,4 +1,4 @@
-// JU6: a Juno-style polysynth voice (OpenTracker 3.x module engine, id 0x81,
+// JU6: a one-DCO polysynth voice (OpenTracker 3.x module engine, id 0x81,
 // module JU6S). Our own design after the voice described in the owner's
 // manuals of the classic one-DCO polysynths of the early 1980s: one DCO with
 // a band-limited saw and a pulse that can sound together (manual or LFO pulse
@@ -10,7 +10,7 @@
 // Gate); one triangle LFO with Rate and Delay; the built-in stereo chorus
 // (Off / I / II, a patch parameter) on the slot's voice sum, as the
 // instrument always had it: the core's shared BBD chorus
-// (audio/bbd_chorus.h, the JUNO insert's DSP), one line per slot. Not a copy
+// (audio/bbd_chorus.h, the BBDC insert's DSP), one line per slot. Not a copy
 // of any instrument.
 //
 // Engine contract (audio/synth_engine.h): Volume (index 21) is never applied

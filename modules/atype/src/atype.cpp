@@ -433,10 +433,11 @@ public:
         q.hh = S.hpH[0];
         if (!S.hpOn) V.hp = Svf{0.0f, 0.0f};
         // The cutoff: Key Track (VCO 2's pitch: the high note in Duo), the
-        // envelope, the LFO, the S&H; from the last block's coefficients.
+        // envelope, the LFO, the S&H, the Performance offset (#23); from the
+        // last block's coefficients.
         const float fe0 = S.envAr ? r0 : a0, fe1 = S.envAr ? V.ar : V.adsr;
-        const float oct0 = S.key * (p20 + v.bendStart - 60.0f) + S.envOct * fe0 + S.lfoOct * S.lfo0 + S.shOct * sh0;
-        const float oct1 = S.key * (V.p2 + v.bend - 60.0f) + S.envOct * fe1 + S.lfoOct * S.lfo1 + S.shOct * V.shOut;
+        const float oct0 = S.key * (p20 + v.bendStart - 60.0f) + S.envOct * fe0 + S.lfoOct * S.lfo0 + S.shOct * sh0 + v.cutoffOct;
+        const float oct1 = S.key * (V.p2 + v.bend - 60.0f) + S.envOct * fe1 + S.lfoOct * S.lfo1 + S.shOct * V.shOut + v.cutoffOct;
         const bool same = V.set && V.mode == S.mode;
         float makeUp;
         if (S.mode == k4Pole) {

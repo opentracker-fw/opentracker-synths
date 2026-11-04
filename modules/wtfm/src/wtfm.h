@@ -1,7 +1,7 @@
 // WTFM: 2-operator wavetable FM synth engine (Tracker Mini engine id 5; spec 21
 // §8.5, docs/specs/2x-08-wtfm-engine.md) [OT].
 //
-// Clean-room DSP of our own design that follows the WTFM parameter set
+// DSP of our own design that follows the WTFM parameter set
 // (budget: <= 12k M4 instructions per voice per block for the Init patch,
 // <= 22k worst case, block-rate modulation, no stored tables):
 //

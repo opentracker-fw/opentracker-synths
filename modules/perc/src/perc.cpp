@@ -788,7 +788,7 @@ OT_BLOCK_RATE bool snareRender(Snare& d, const SynthParams& p, float bend0, floa
 
 // Metal source of the hi-hat and the cymbal. Classic = six squares spread
 // around Tone Pitch by Timbre (0 = all at Tone Pitch, 12 = the classic
-// 808-like spread, 24 = twice that), packed as 16-bit phases; FM = 2-op FM
+// drum-machine style spread, 24 = twice that), packed as 16-bit phases; FM = 2-op FM
 // with one of 25 ratio / index presets.
 const float kMetalRatio[6] = {1.0f, 1.4827f, 1.8003f, 2.5460f, 2.6303f, 3.8967f};
 struct MetalSrc {
