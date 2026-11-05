@@ -37,13 +37,13 @@ const PatchParamRange kParams[kParamCount] = {
     {3.5f, 0.1f, 20},   // LFO Rate (Hz)
     {0.6f, 0, 5},       // LFO Delay
     {1, 0, 2},          // Volume
-    {0, 0, 2},          // Chorus: Off / I / II (absent in older patches: Off)
+    {0, 0, 3},          // Chorus: Off / I / II / I+II (absent in older patches: Off)
 };
 
 const char* const kPwmName[2] = {"Manual", "LFO"};
 const char* const kHpfName[4] = {"0 Boost", "1 Flat", "2", "3"};
 const char* const kVcaName[2] = {"Env", "Gate"};
-const char* const kChorusName[3] = {"Off", "I", "II"};
+const char* const kChorusName[4] = {"Off", "I", "II", "I+II"};
 
 #define E(n) OT_SYNTH_ENUM(n)
 #define F(f) f, nullptr, 0

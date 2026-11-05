@@ -38,7 +38,7 @@ enum Param : int {
 };
 enum PwMode : int { kPwManual = 0, kPwLfo };
 enum VcaMode : int { kVcaEnv = 0, kVcaGate };
-enum Chorus : int { kChorusOff = 0, kChorusI, kChorusII };
+enum Chorus : int { kChorusOff = 0, kChorusI, kChorusII, kChorusI_II };
 
 ISynthEngine* engine();
 // Tests: the chorus tap delay of side c (0 = L, 1 = R) at the end of the

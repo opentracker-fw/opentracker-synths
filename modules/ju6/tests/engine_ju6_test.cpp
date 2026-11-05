@@ -862,7 +862,7 @@ TEST(ju6_chorus_off_is_the_engine_before_the_chorus) {
 }
 
 // ---------------------------------------------------------------------------
-// The built-in chorus (patch parameter Chorus: Off / I / II, the shared BBD
+// The built-in chorus (patch parameter Chorus: Off / I / II / I+II, the shared BBD
 // chorus of core audio/bbd_chorus.h on the slot's voice sum).
 
 namespace {
@@ -875,7 +875,9 @@ std::vector<float> chorusContext(int mode) {
 struct ChorusRef {
     double hz, minMs, maxMs;
 };
-constexpr ChorusRef kChorusRef[2] = {{0.5, 2.0, 5.0}, {0.8, 1.5, 5.5}};
+constexpr int kChorusModes = 3;   // I, II, I+II
+// I+II runs I and II at once: chorusDelay() reports I's pair, so its reference is I's.
+constexpr ChorusRef kChorusRef[kChorusModes] = {{0.5, 2.0, 5.0}, {0.8, 1.5, 5.5}, {0.5, 2.0, 5.0}};
 double corrLR(const Buf& a, const Buf& b, size_t from) {
     double ab = 0, aa = 0, bb = 0;
     for (size_t i = from; i < a.size() && i < b.size(); ++i) {
@@ -896,14 +898,15 @@ TEST(ju6_chorus_parameter) {
     const PatchParamRange& r = d->params[ju6::kChorus];
     CHECK_EQ(r.def, 0.0f);   // Off (a patch without the field)
     CHECK_EQ(r.min, 0.0f);
-    CHECK_EQ(r.max, 2.0f);
+    CHECK_EQ(r.max, 3.0f);
     CHECK_STR(d->ui[ju6::kChorus].label, "Chorus");
     CHECK_EQ(int(d->ui[ju6::kChorus].fmt), int(synthui::kFmtEnum));
-    CHECK_EQ(int(d->ui[ju6::kChorus].nameCount), 3);
-    if (d->ui[ju6::kChorus].nameCount == 3) {
+    CHECK_EQ(int(d->ui[ju6::kChorus].nameCount), 4);
+    if (d->ui[ju6::kChorus].nameCount == 4) {
         CHECK_STR(d->ui[ju6::kChorus].names[0], "Off");
         CHECK_STR(d->ui[ju6::kChorus].names[1], "I");
         CHECK_STR(d->ui[ju6::kChorus].names[2], "II");
+        CHECK_STR(d->ui[ju6::kChorus].names[3], "I+II");
     }
 }
 
@@ -946,7 +949,7 @@ TEST(ju6_chorus_off_is_mono_and_untouched) {
 }
 
 TEST(ju6_chorus_modes_rate_and_delay) {
-    for (int mode = 1; mode <= 2; ++mode) {
+    for (int mode = 1; mode <= kChorusModes; ++mode) {
         const ChorusRef& ref = kChorusRef[mode - 1];
         Rig g(chorusContext(mode));
         g.on(0, 48.0f);
@@ -983,7 +986,7 @@ TEST(ju6_chorus_modes_rate_and_delay) {
 }
 
 TEST(ju6_chorus_decorrelates_the_sides) {
-    for (int mode = 1; mode <= 2; ++mode) {
+    for (int mode = 1; mode <= kChorusModes; ++mode) {
         Rig g(chorusContext(mode));
         g.on(0, 48.0f);
         g.on(1, 55.0f);
@@ -996,8 +999,25 @@ TEST(ju6_chorus_decorrelates_the_sides) {
     }
 }
 
+// I+II adds mode II's taps to I's: not the same sound as either, about the same level.
+TEST(ju6_chorus_both_is_i_and_ii_together) {
+    Buf out[kChorusModes];
+    for (int mode = 1; mode <= kChorusModes; ++mode) {
+        Rig g(chorusContext(mode));
+        g.on(0, 48.0f);
+        g.on(1, 55.0f);
+        g.run(2 * kBlocksPerSec);
+        out[mode - 1] = g.L;
+    }
+    CHECK(rmsDiff(out[2], out[0]) > 0.01 * rms(out[0]));
+    CHECK(rmsDiff(out[2], out[1]) > 0.01 * rms(out[1]));
+    const double db = 20.0 * std::log10(rms(out[2]) / rms(out[0]));
+    std::printf("  JU6 chorus I+II vs I: level %+.2f dB\n", db);
+    CHECK(std::fabs(db) < 1.5);
+}
+
 TEST(ju6_chorus_silence_in_silence_out) {
-    for (int mode = 1; mode <= 2; ++mode) {
+    for (int mode = 1; mode <= kChorusModes; ++mode) {
         Rig g(chorusContext(mode));
         g.run(50);   // no note
         CHECK_EQ(peak(g.L), 0.0f);
@@ -1048,7 +1068,7 @@ TEST(ju6_chorus_each_slot_has_its_own_line) {
 }
 
 TEST(ju6_chorus_no_nan_or_denormals) {
-    for (int mode = 1; mode <= 2; ++mode) {
+    for (int mode = 1; mode <= kChorusModes; ++mode) {
         std::vector<float> c = richContext();
         c[ju6::kChorus] = float(mode);
         c[ju6::kResonance] = 1.0f;   // self-oscillation into the line's soft clip

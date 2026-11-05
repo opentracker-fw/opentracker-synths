@@ -243,7 +243,7 @@ public:
             S.relC = blockCoef(E[kRelease]);
             S.sustain = clampf(E[kSustain], 0.0f, 1.0f);
             S.delay = clampf(E[kLfoDelay], 0.0f, 5.0f);
-            S.chorusMode = uint8_t(enumOf(E[kChorus], kChorusII));
+            S.chorusMode = uint8_t(enumOf(E[kChorus], kChorusI_II));
             S.serial = p.serial;
             S.valid = 1;
         }
