@@ -23,7 +23,8 @@ const PatchParamRange kParams[25] = {
 
 // [OT] extension parameters (2.x stereo, patch field 16): Width (slot level)
 // and Stereo (the stack's pairs split between L and R), 0..1, 0 = mono.
-const PatchParamRange kExt[2] = {{0.0f, 0.0f, 1.0f, kParamFlagInitAbsent}, {0.0f, 0.0f, 1.0f, kParamFlagInitAbsent}};
+const PatchParamRange kExt[3] = {{0.0f, 0.0f, 1.0f, kParamFlagInitAbsent}, {0.0f, 0.0f, 1.0f, kParamFlagInitAbsent},
+                                  {0.0f, 0.0f, 1.0f, kParamFlagInitAbsent | kParamFlagSpread}};
 
 // --- enum names --------------------------------------------------------------
 const char* const kFatFilter[3] = {"LP MG 24dB", "LP OB 24dB", "LP OB 12dB"};
@@ -33,7 +34,7 @@ const char* const kFatFilter[3] = {"LP MG 24dB", "LP OB 24dB", "LP OB 12dB"};
 
 // --- Edit Patch --------------------------------------------------------------
 // [OT] the table ends with the extension parameters (Width, Stereo), not macro targets.
-const ParamUi kUi[27] = {
+const ParamUi kUi[28] = {
     {"Fatness", F(kFmtVal100)},    {"Brightness", F(kFmtVal100)}, {"LFO Amt", F(kFmtPct)},
     {"Timbre", F(kFmtVal100)},     {"Noise", F(kFmtPct)},         {"Reset", F(kFmtOnOff)},
     {"Type", E(kFatFilter)},       {"Cutoff", F(kFmtHz)},         {"Resonance", F(kFmtPctMax)},
@@ -43,13 +44,14 @@ const ParamUi kUi[27] = {
     {"Release", F(kFmtSec)},       {"Frequency", F(kFmtLfoHz)},   {"Waveform", E(kWave)},
     {"Retrigger", E(kRetrig)},     {"Glide Mode", E(kGlide)},     {"Glide Time", F(kFmtSec)},
     {"Volume", F(kFmtPct)},        {"Width", F(kFmtPct)},         {"Stereo", F(kFmtPct)},
+    {"Spread", F(kFmtPct)},
 };
 const uint8_t kFatOsc[] = {0, 1, 3, 2, 4, 5, 26};
 const uint8_t kFatFlt[] = {7, 8, 6, 10, 9};
 const uint8_t kFatAmp[] = {11, 12, 13, 14};
 const uint8_t kFatEnv1[] = {15, 16, 17, 18};
 const uint8_t kFatLfo[] = {19, 20, 21};
-const uint8_t kFatVoice[] = {22, 23, 24, 25};
+const uint8_t kFatVoice[] = {22, 23, 24, 25, 27};
 
 #undef E
 #undef F
@@ -62,7 +64,7 @@ const Section kSections[] = {OT_SYNTH_SECTION("Osc", "Oscillator", kFatOsc), OT_
 
 extern const SynthDescriptor kFatDescriptor;
 const SynthDescriptor kFatDescriptor = {kSynthEngineFat, "FAT", 0, 24, 25, kParams, kUi, kSections,
-                                     uint8_t(sizeof(kSections) / sizeof(kSections[0])), 2, kExt};
+                                     uint8_t(sizeof(kSections) / sizeof(kSections[0])), 3, kExt};
 
 }  // namespace mod
 }  // namespace ot

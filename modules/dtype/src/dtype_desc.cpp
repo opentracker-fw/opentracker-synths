@@ -63,7 +63,10 @@ const char* const kKeyName[4] = {"Off", "1/3", "2/3", "Full"};
 
 #define E(n) OT_SYNTH_ENUM(n)
 #define F(f) f, nullptr, 0
-const ParamUi kUi[kParamCount] = {
+// [3.x] extension parameters (patch field 16): Width and Spread, 0..1, 0 = mono.
+const PatchParamRange kExt[2] = {{0.0f, 0.0f, 1.0f, kParamFlagInitAbsent}, {0.0f, 0.0f, 1.0f, kParamFlagInitAbsent | kParamFlagSpread}};
+
+const ParamUi kUi[kParamCount + 2] = {
     {"Range", E(kRangeName)},     {"Wave", E(kWave12Name)},      {"Level", F(kFmtPct)},
     {"Range", E(kRangeName)},     {"Wave", E(kWave12Name)},      {"Tune", F(kFmtSemi)},
     {"Fine", F(kFmtCents)},       {"Level", F(kFmtPct)},         {"Range", E(kRangeName)},
@@ -76,6 +79,7 @@ const ParamUi kUi[kParamCount] = {
     {"Mod Mix", F(kFmtPct)},      {"Osc Mod", F(kFmtPct)},       {"Filter Mod", F(kFmtPct)},
     {"Wheel", F(kFmtPct)},        {"Glide Mode", E(names::kGlide)}, {"Glide Time", F(kFmtSec)},
     {"Decay Sw", F(kFmtOnOff)},   {"Volume", F(kFmtPct)},
+    {"Width", F(kFmtPct)},          {"Spread", F(kFmtPct)},
 };
 #undef E
 #undef F
@@ -88,7 +92,7 @@ const uint8_t kVcf[] = {kCutoff, kEmphasis, kContour, kKeyTrack};
 const uint8_t kFenv[] = {kFAttack, kFDecay, kFSustain};
 const uint8_t kLenv[] = {kLAttack, kLDecay, kLSustain};
 const uint8_t kMod[] = {kModMix, kOscMod, kFilterMod, kWheel};
-const uint8_t kCtrl[] = {kGlideMode, kGlideTime, kDecaySw, kVolume};
+const uint8_t kCtrl[] = {kGlideMode, kGlideTime, kDecaySw, kVolume, uint8_t(kParamCount), uint8_t(kParamCount + 1)};
 
 const Section kSections[] = {
     OT_SYNTH_SECTION("VCO1", "Oscillator 1", kOsc1),   OT_SYNTH_SECTION("VCO2", "Oscillator 2", kOsc2),
@@ -102,7 +106,7 @@ const Section kSections[] = {
 extern const SynthDescriptor kDtypeDescriptor;
 const SynthDescriptor kDtypeDescriptor = {audio::dtype::kEngineId, "DTYPE", 0, int8_t(audio::dtype::kVolume),
                                          uint8_t(audio::dtype::kParamCount), kParams, kUi, kSections,
-                                         uint8_t(sizeof(kSections) / sizeof(kSections[0])), 0, nullptr, "D-Type"};
+                                         uint8_t(sizeof(kSections) / sizeof(kSections[0])), 2, kExt, "D-Type"};
 
 }  // namespace mod
 }  // namespace ot

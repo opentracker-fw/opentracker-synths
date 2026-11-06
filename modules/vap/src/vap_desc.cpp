@@ -29,7 +29,7 @@ const PatchParamRange kParams[60] = {
 #undef MODSLOT
 
 // [OT] extension parameters (2.x stereo, patch field 16): Width, 0..1, 0 = mono.
-const PatchParamRange kExt[1] = {{0.0f, 0.0f, 1.0f, kParamFlagInitAbsent}};
+const PatchParamRange kExt[2] = {{0.0f, 0.0f, 1.0f, kParamFlagInitAbsent}, {0.0f, 0.0f, 1.0f, kParamFlagInitAbsent | kParamFlagSpread}};
 
 // --- enum names --------------------------------------------------------------
 const char* const kVapDest[14] = {"Osc1 PWM",   "Osc2 PWM",         "Osc Mix",    "Filter Cutoff", "Amp Env Sustain",
@@ -42,7 +42,7 @@ const char* const kVapDest[14] = {"Osc1 PWM",   "Osc2 PWM",         "Osc Mix",  
 // --- Edit Patch --------------------------------------------------------------
 #define MODROW(k) {"Src " #k, E(kModSrc)}, {"Dest " #k, E(kVapDest)}, {"Amt " #k, F(kFmtPctMax)}
 // [OT] the table ends with the extension parameters (Width), not macro targets.
-const ParamUi kUi[61] = {
+const ParamUi kUi[62] = {
     {"Shape 1", F(kFmtVal100)},   {"Shape 2", F(kFmtVal100)},  {"PW 1", F(kFmtVal100)},
     {"PW 2", F(kFmtVal100)},      {"Mix", F(kFmtPct)},         {"Tune 1", F(kFmtSemi)},
     {"Tune 2", F(kFmtSemi)},      {"Detune", F(kFmtCents)},    {"Finetune", F(kFmtCents)},
@@ -59,6 +59,7 @@ const ParamUi kUi[61] = {
     {"Volume", F(kFmtPct)},       {"Sync", F(kFmtOnOff)},      {"Noise", F(kFmtPct)},
     MODROW(1), MODROW(2), MODROW(3), MODROW(4), MODROW(5), MODROW(6),
     {"Width", F(kFmtPct)},
+    {"Spread", F(kFmtPct)},
 };
 #undef MODROW
 const uint8_t kVapOsc[] = {4, 0, 1, 2, 3, 5, 6, 8, 7, 41, 40, 9, 10, 38};
@@ -69,7 +70,7 @@ const uint8_t kVapEnv2[] = {23, 24, 25, 26};
 const uint8_t kVapLfo1[] = {27, 28, 29, 30};
 const uint8_t kVapLfo2[] = {31, 32, 33, 34};
 const uint8_t kVapMod[] = {42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59};
-const uint8_t kVapVoice[] = {35, 36, 39, 60};
+const uint8_t kVapVoice[] = {35, 36, 39, 60, 61};
 
 #undef E
 #undef F
@@ -84,7 +85,7 @@ const Section kSections[] = {OT_SYNTH_SECTION("Osc", "Oscillators", kVapOsc), OT
 
 extern const SynthDescriptor kVapDescriptor;
 const SynthDescriptor kVapDescriptor = {kSynthEngineVap, "VAP", 0, 39, 60, kParams, kUi, kSections,
-                                     uint8_t(sizeof(kSections) / sizeof(kSections[0])), 1, kExt};
+                                     uint8_t(sizeof(kSections) / sizeof(kSections[0])), 2, kExt};
 
 }  // namespace mod
 }  // namespace ot

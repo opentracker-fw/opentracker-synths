@@ -300,7 +300,7 @@ TEST(hand_descriptor_is_valid) {
     CHECK_EQ(int(d->flags), 0);
     CHECK_EQ(patchVolumeParam(hand::kEngineId), int(hand::kVolume));
     CHECK_EQ(int(d->sectionCount), 15);
-    CHECK_EQ(int(d->extCount), 0);
+    CHECK_EQ(int(d->extCount), 2);   // Width, Spread
     CHECK_STR(synthEngineFolder(hand::kEngineId), "HANDTYPE");
     CHECK_STR(synthEngineDisplayName(hand::kEngineId), "Hand-Type");
     const int k = synthModelListIndex(hand::kEngineId);
@@ -320,7 +320,7 @@ TEST(hand_descriptor_is_valid) {
         }
         CHECK_EQ(macros, 0);
         for (int j = 0; j < sec.count; ++j) {
-            CHECK(sec.params[j] < kN);
+            CHECK(sec.params[j] < kN + 2);   // + Width, Spread
             if (sec.params[j] < kN) ++seen[sec.params[j]];
         }
     }

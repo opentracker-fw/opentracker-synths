@@ -320,7 +320,7 @@ TEST(eight_descriptor_is_valid) {
     CHECK_EQ(int(d->paramCount), kN);
     CHECK_EQ(int(d->volumeParam), int(eight::kVolume));
     CHECK_EQ(int(d->sectionCount), 14);
-    CHECK_EQ(int(d->extCount), 0);
+    CHECK_EQ(int(d->extCount), 2);   // Width, Spread
     CHECK_STR(synthEngineFolder(eight::kEngineId), "8TYPE");   // the leading digit survives
     CHECK_STR(synthEngineDisplayName(eight::kEngineId), "8-Type");
     const int k = synthModelListIndex(eight::kEngineId);

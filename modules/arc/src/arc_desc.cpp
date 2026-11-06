@@ -60,7 +60,10 @@ const char* const kAuxName[3] = {"Off", "Square", "Noise"};
     {"MUL", E(kMulName)}, {"DT", F(kFmtInt)}, {"Level", F(kFmtPct)}, {"RS", F(kFmtInt)}, {"AR", F(kFmtInt)},  \
         {"D1R", F(kFmtInt)}, {"D1L", F(kFmtInt)}, {"D2R", F(kFmtInt)}, {"RR", F(kFmtInt)}, {"Loop", E(kLoopName)}, \
         {"AMS", F(kFmtInt)}
-const ParamUi kUi[kParamCount] = {
+// [3.x] extension parameters (patch field 16): Width and Spread, 0..1, 0 = mono.
+const PatchParamRange kExt[2] = {{0.0f, 0.0f, 1.0f, kParamFlagInitAbsent}, {0.0f, 0.0f, 1.0f, kParamFlagInitAbsent | kParamFlagSpread}};
+
+const ParamUi kUi[kParamCount + 2] = {
     {"Algorithm", E(kAlgName)},   {"Feedback", F(kFmtInt)},      {"DAC", E(kDacName)},
     {"Glide Mode", E(names::kGlide)}, {"Glide Time", F(kFmtSec)}, {"Volume", F(kFmtPct)},
     {"LFO Rate", E(kLfoName)},    {"PMS", F(kFmtInt)},
@@ -69,6 +72,7 @@ const ParamUi kUi[kParamCount] = {
     {"Aux Decay", F(kFmtInt)},    {"Arp Mode", E(chip::kArpNames)}, {"Arp Rate", E(chip::kRateNames)},
     {"Arp Note 2", F(kFmtSemi)},  {"Arp Note 3", F(kFmtSemi)},   {"Slide Start", F(kFmtSemi)},
     {"Slide Time", F(kFmtSec)},
+    {"Width", F(kFmtPct)},          {"Spread", F(kFmtPct)},
 };
 #undef OPUI
 #undef E
@@ -80,7 +84,7 @@ const uint8_t kOp2[] = OPS(1);
 const uint8_t kOp3[] = OPS(2);
 const uint8_t kOp4[] = OPS(3);
 #undef OPS
-const uint8_t kGlobal[] = {kAlgorithm, kFeedback, kDac, kGlideMode, kGlideTime, kVolume};
+const uint8_t kGlobal[] = {kAlgorithm, kFeedback, kDac, kGlideMode, kGlideTime, kVolume, uint8_t(kParamCount), uint8_t(kParamCount + 1)};
 const uint8_t kLfo[] = {kLfoRate, kPms};
 const uint8_t kAux[] = {kAuxWave, kAuxLevel, kAuxOctave, kAuxDecay};
 const uint8_t kChip[] = {kArpMode, kArpRate, kArpNote2, kArpNote3, kSlideStart, kSlideTime};
@@ -97,7 +101,7 @@ const Section kSections[] = {
 extern const SynthDescriptor kArcDescriptor;
 const SynthDescriptor kArcDescriptor = {audio::arc::kEngineId, "ARCTYPE", 0, int8_t(audio::arc::kVolume),
                                        uint8_t(audio::arc::kParamCount), kParams, kUi, kSections,
-                                       uint8_t(sizeof(kSections) / sizeof(kSections[0])), 0, nullptr, "Arc-Type"};
+                                       uint8_t(sizeof(kSections) / sizeof(kSections[0])), 2, kExt, "Arc-Type"};
 
 }  // namespace mod
 }  // namespace ot

@@ -68,7 +68,10 @@ const char* const kDecName[16] = {"6 ms",   "24 ms", "39 ms", "64 ms", "106 ms",
     {"Wave", E(kWaveName)}, {"PW", F(kFmtPct)}, {"PWM Depth", F(kFmtPct)}, {"Level", F(kFmtPct)},           \
         {"Semi", F(kFmtSemi)}, {"Fine", F(kFmtCents)}, {"Ring", F(kFmtOnOff)}, {"Sync", F(kFmtOnOff)},          \
         {"Filt", F(kFmtOnOff)}, {"Clean", F(kFmtOnOff)}
-const ParamUi kUi[kParamCount] = {
+// [3.x] extension parameters (patch field 16): Width and Spread, 0..1, 0 = mono.
+const PatchParamRange kExt[2] = {{0.0f, 0.0f, 1.0f, kParamFlagInitAbsent}, {0.0f, 0.0f, 1.0f, kParamFlagInitAbsent | kParamFlagSpread}};
+
+const ParamUi kUi[kParamCount + 2] = {
     OSCUI, OSCUI, OSCUI,
     {"Cutoff", F(kFmtHz)},         {"Resonance", F(kFmtInt)},     {"Mode", E(kModeName)},
     {"Curve", E(kCurveName)},      {"Dirt", F(kFmtPct)},          {"Key Track", F(kFmtPct)},
@@ -79,6 +82,7 @@ const ParamUi kUi[kParamCount] = {
     {"Arp Rate", E(chip::kRateNames)}, {"Arp Note 2", F(kFmtSemi)}, {"Arp Note 3", F(kFmtSemi)},
     {"Vib Rate", F(kFmtLfoHz)},    {"Vib Depth", F(kFmtSemi)},    {"Vib Delay", F(kFmtSec)},
     {"Slide Start", F(kFmtSemi)},  {"Slide Time", F(kFmtSec)},
+    {"Width", F(kFmtPct)},          {"Spread", F(kFmtPct)},
 };
 #undef OSCUI
 #undef E
@@ -91,7 +95,7 @@ const uint8_t kOsc3[] = OSCS(2);
 #undef OSCS
 const uint8_t kFilter[] = {kCutoff, kResonance, kMode, kCurve, kDirt, kKeyTrack, kEnvAmt, kEnvDecay};
 const uint8_t kEnv[] = {kAttack, kDecay, kSustain, kRelease};
-const uint8_t kVoice[] = {kPwmRate, kGrit, kGlideMode, kGlideTime, kVolume};
+const uint8_t kVoice[] = {kPwmRate, kGrit, kGlideMode, kGlideTime, kVolume, uint8_t(kParamCount), uint8_t(kParamCount + 1)};
 const uint8_t kChip[] = {kArpMode, kArpRate, kArpNote2, kArpNote3, kVibRate, kVibDepth, kVibDelay, kSlideStart, kSlideTime};
 
 const Section kSections[] = {
@@ -105,7 +109,7 @@ const Section kSections[] = {
 extern const SynthDescriptor kEightDescriptor;
 const SynthDescriptor kEightDescriptor = {audio::eight::kEngineId, "8TYPE", 0, int8_t(audio::eight::kVolume),
                                          uint8_t(audio::eight::kParamCount), kParams, kUi, kSections,
-                                         uint8_t(sizeof(kSections) / sizeof(kSections[0])), 0, nullptr, "8-Type"};
+                                         uint8_t(sizeof(kSections) / sizeof(kSections[0])), 2, kExt, "8-Type"};
 
 }  // namespace mod
 }  // namespace ot

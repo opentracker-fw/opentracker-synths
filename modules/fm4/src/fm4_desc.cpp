@@ -30,16 +30,20 @@ const char* const kMultName[16] = {"0.5", "1", "2", "3", "4", "5", "6", "7", "8"
 #define OPUI {"Mult", E(kMultName)}, {"Detune", F(kFmtInt)}, {"Level", F(kFmtPct)}, {"Attack", F(kFmtSec)}, \
              {"Decay", F(kFmtSec)}, {"Sustain", F(kFmtPct)}, {"Sus Rate", F(kFmtSec)}, {"Release", F(kFmtSec)}, \
              {"Tremolo", F(kFmtOnOff)}
-const ParamUi kUi[audio::fm4::kParamCount] = {
+// [3.x] extension parameters (patch field 16): Width and Spread, 0..1, 0 = mono.
+const PatchParamRange kExt[2] = {{0.0f, 0.0f, 1.0f, kParamFlagInitAbsent}, {0.0f, 0.0f, 1.0f, kParamFlagInitAbsent | kParamFlagSpread}};
+
+const ParamUi kUi[audio::fm4::kParamCount + 2] = {
     {"Algorithm", E(kAlgName)}, {"Feedback", F(kFmtInt)}, {"LFO Rate", F(kFmtLfoHz)}, {"Vibrato", F(kFmtPct)},
     {"Tremolo", F(kFmtPct)},    {"Glide Time", F(kFmtSec)}, {"Volume", F(kFmtPct)},
     OPUI, OPUI, OPUI, OPUI,
+    {"Width", F(kFmtPct)},          {"Spread", F(kFmtPct)},
 };
 #undef OPUI
 #undef E
 #undef F
 
-const uint8_t kGlobal[] = {0, 1, 6, 5};
+const uint8_t kGlobal[] = {0, 1, 6, 5, uint8_t(audio::fm4::kParamCount), uint8_t(audio::fm4::kParamCount + 1)};
 const uint8_t kLfo[] = {2, 3, 4};
 #define OPSEC(k) {7 + 9 * k, 8 + 9 * k, 9 + 9 * k, 10 + 9 * k, 11 + 9 * k, 12 + 9 * k, 13 + 9 * k, 14 + 9 * k, 15 + 9 * k}
 const uint8_t kOp1[] = OPSEC(0);
@@ -59,7 +63,7 @@ const Section kSections[] = {
 extern const SynthDescriptor kFm4Descriptor;
 const SynthDescriptor kFm4Descriptor = {audio::fm4::kEngineId, "FM4", 0, int8_t(audio::fm4::kVolume),
                                        uint8_t(audio::fm4::kParamCount), kParams, kUi, kSections,
-                                       uint8_t(sizeof(kSections) / sizeof(kSections[0])), 0, nullptr};
+                                       uint8_t(sizeof(kSections) / sizeof(kSections[0])), 2, kExt};
 
 }  // namespace mod
 }  // namespace ot

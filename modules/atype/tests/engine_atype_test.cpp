@@ -423,7 +423,7 @@ TEST(atype_descriptor_is_valid) {
     CHECK_EQ(patchVolumeParam(atype::kEngineId), int(atype::kVolume));
     CHECK_STR(patchEngineName(atype::kEngineId), "ATYPE");
     CHECK_EQ(int(d->sectionCount), 15);
-    CHECK_EQ(int(d->extCount), 0);   // mono: no Width
+    CHECK_EQ(int(d->extCount), 2);   // Width, Spread
     CHECK_STR(synthEngineFolder(atype::kEngineId), "ATYPE");
     CHECK_STR(synthEngineDisplayName(atype::kEngineId), "A-Type");
     // In the model list after the Mini models and the module engines before it.
@@ -449,7 +449,7 @@ TEST(atype_descriptor_is_valid) {
         }
         CHECK_EQ(macros, 0);
         for (int j = 0; j < sec.count; ++j) {
-            CHECK(sec.params[j] < kN);
+            CHECK(sec.params[j] < kN + 2);   // + Width, Spread
             if (sec.params[j] < kN) ++seen[sec.params[j]];
         }
     }

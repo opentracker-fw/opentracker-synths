@@ -428,7 +428,7 @@ TEST(cstype_descriptor_is_valid) {
     CHECK_EQ(patchVolumeParam(cstype::kEngineId), int(cstype::kVolume));
     CHECK_STR(patchEngineName(cstype::kEngineId), "CSTYPE");
     CHECK_EQ(int(d->sectionCount), synthui::kMaxSections);
-    CHECK_EQ(int(d->extCount), 0);
+    CHECK_EQ(int(d->extCount), 2);   // Width, Spread
     CHECK_STR(synthEngineFolder(cstype::kEngineId), "CSTYPE");
     CHECK_STR(synthEngineDisplayName(cstype::kEngineId), "CS-Type");
     const int k = synthModelListIndex(cstype::kEngineId);
@@ -451,7 +451,7 @@ TEST(cstype_descriptor_is_valid) {
         }
         CHECK_EQ(macros, 0);
         for (int j = 0; j < sec.count; ++j) {
-            CHECK(sec.params[j] < kN);
+            CHECK(sec.params[j] < kN + 2);   // + Width, Spread
             if (sec.params[j] < kN) ++seen[sec.params[j]];
         }
     }

@@ -86,7 +86,10 @@ const char* const kLenName[8] = {"Off", "62 ms", "125 ms", "188 ms", "250 ms", "
 
 #define E(n) OT_SYNTH_ENUM(n)
 #define F(f) f, nullptr, 0
-const ParamUi kUi[kParamCount] = {
+// [3.x] extension parameters (patch field 16): Width and Spread, 0..1, 0 = mono.
+const PatchParamRange kExt[2] = {{0.0f, 0.0f, 1.0f, kParamFlagInitAbsent}, {0.0f, 0.0f, 1.0f, kParamFlagInitAbsent | kParamFlagSpread}};
+
+const ParamUi kUi[kParamCount + 2] = {
     {"Channel", E(kChanName)},     {"Duty", E(kDutyName)},        {"Sweep", E(kSweepName)},
     {"Sweep Time", F(kFmtInt)},    {"Sweep Shift", F(kFmtInt)},   {"Sweep Cut", F(kFmtOnOff)},
     {"Pulse 2", F(kFmtPct)},       {"P2 Detune", F(kFmtCents)},   {"P2 Duty", E(kDutyName)},
@@ -105,6 +108,7 @@ const ParamUi kUi[kParamCount] = {
     {"Vib Delay", F(kFmtSec)},     {"Slide Start", F(kFmtSemi)},  {"Slide Time", F(kFmtSec)},
     {"Glide Mode", E(names::kGlide)}, {"Glide Time", F(kFmtSec)}, {"Bits", F(kFmtInt)},
     {"Volume", F(kFmtPct)},
+    {"Width", F(kFmtPct)},          {"Spread", F(kFmtPct)},
 };
 #undef E
 #undef F
@@ -117,7 +121,7 @@ const uint8_t kEnvS[] = {kEnvInit, kEnvDir, kEnvStep, kRelease, kLength};
 const uint8_t kDrumS[] = {kKickTune, kKickSweep, kKickDecay, kSnareWidth, kSnareDecay, kHatShift,
                           kHatClosedDecay, kHatOpenDecay, kCrashDecay, kTomDecay, kBlipDecay};
 const uint8_t kChipS[] = {kArpMode, kArpRate, kArpNote2, kArpNote3, kVibRate, kVibDepth, kVibDelay, kSlideStart, kSlideTime};
-const uint8_t kCtrlS[] = {kGlideMode, kGlideTime, kBits, kVolume};
+const uint8_t kCtrlS[] = {kGlideMode, kGlideTime, kBits, kVolume, uint8_t(kParamCount), uint8_t(kParamCount + 1)};
 
 const Section kSections[] = {
     OT_SYNTH_SECTION("CHAN", "Channel", kChan),   OT_SYNTH_SECTION("PULSE", "Pulse", kPulseS),
@@ -131,7 +135,7 @@ const Section kSections[] = {
 extern const SynthDescriptor kHandDescriptor;
 const SynthDescriptor kHandDescriptor = {audio::hand::kEngineId, "HANDTYPE", 0, int8_t(audio::hand::kVolume),
                                         uint8_t(audio::hand::kParamCount), kParams, kUi, kSections,
-                                        uint8_t(sizeof(kSections) / sizeof(kSections[0])), 0, nullptr, "Hand-Type"};
+                                        uint8_t(sizeof(kSections) / sizeof(kSections[0])), 2, kExt, "Hand-Type"};
 
 }  // namespace mod
 }  // namespace ot

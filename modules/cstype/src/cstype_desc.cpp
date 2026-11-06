@@ -82,7 +82,10 @@ const char* const kFnName[5] = {"Sine", "Saw", "Ramp", "Square", "Noise"};
     {"F Decay", F(kFmtSec)},     {"F Release", F(kFmtSec)},   {"Attack", F(kFmtSec)},                    \
     {"Decay", F(kFmtSec)},       {"Sustain", F(kFmtPct)},     {"Release", F(kFmtSec)},                   \
     {"Level", F(kFmtPct)}
-const ParamUi kUi[kParamCount] = {
+// [3.x] extension parameters (patch field 16): Width and Spread, 0..1, 0 = mono.
+const PatchParamRange kExt[2] = {{0.0f, 0.0f, 1.0f, kParamFlagInitAbsent}, {0.0f, 0.0f, 1.0f, kParamFlagInitAbsent | kParamFlagSpread}};
+
+const ParamUi kUi[kParamCount + 2] = {
     LAYER_UI,
     LAYER_UI,
     {"Brilliance", F(kFmtPct)},  {"Resonance", F(kFmtPct)},   {"II Detune", F(kFmtCents)},
@@ -93,6 +96,7 @@ const ParamUi kUi[kParamCount] = {
     {"After->VCO", F(kFmtPct)},  {"After->VCF", F(kFmtPct)},  {"After->VCA", F(kFmtPct)},
     {"Ribbon", F(kFmtPct)},      {"Ribbon Rng", F(kFmtSemi)}, {"Glide Mode", E(names::kGlide)},
     {"Glide Time", F(kFmtSec)},  {"Volume", F(kFmtPct)},
+    {"Width", F(kFmtPct)},          {"Spread", F(kFmtPct)},
 };
 #undef LAYER_UI
 #undef E
@@ -115,7 +119,7 @@ const uint8_t kVca2[] = VCA(kLayer2);
 #undef VCA
 const uint8_t kMix[] = {kBrilliance, kResonance, kDetune, kRmDepth, kRmSpeed, kRmSweep, kRmDecay};
 const uint8_t kMod[] = {kFunction, kSpeed, kToVco, kToVcf, kToVca, kTouch, kInitBril, kInitLevelVel, kAfterVco, kAfterVcf, kAfterVca};
-const uint8_t kCtrl[] = {kRibbon, kRibbonRange, kGlideMode, kGlideTime, kVolume};
+const uint8_t kCtrl[] = {kRibbon, kRibbonRange, kGlideMode, kGlideTime, kVolume, uint8_t(kParamCount), uint8_t(kParamCount + 1)};
 
 const Section kSections[] = {
     OT_SYNTH_SECTION("I.OSC", "Layer I Oscillator", kOsc1),   OT_SYNTH_SECTION("I.VCF", "Layer I Filters", kVcf1),
@@ -129,7 +133,7 @@ const Section kSections[] = {
 extern const SynthDescriptor kCstypeDescriptor;
 const SynthDescriptor kCstypeDescriptor = {audio::cstype::kEngineId, "CSTYPE", 0, int8_t(audio::cstype::kVolume),
                                           uint8_t(audio::cstype::kParamCount), kParams, kUi, kSections,
-                                          uint8_t(sizeof(kSections) / sizeof(kSections[0])), 0, nullptr, "CS-Type"};
+                                          uint8_t(sizeof(kSections) / sizeof(kSections[0])), 2, kExt, "CS-Type"};
 
 }  // namespace mod
 }  // namespace ot

@@ -79,7 +79,10 @@ const char* const kPrioName[3] = {"Last", "Low", "High"};
 
 #define E(n) OT_SYNTH_ENUM(n)
 #define F(f) f, nullptr, 0
-const ParamUi kUi[kParamCount] = {
+// [3.x] extension parameters (patch field 16): Width and Spread, 0..1, 0 = mono.
+const PatchParamRange kExt[2] = {{0.0f, 0.0f, 1.0f, kParamFlagInitAbsent}, {0.0f, 0.0f, 1.0f, kParamFlagInitAbsent | kParamFlagSpread}};
+
+const ParamUi kUi[kParamCount + 2] = {
     {"Range", E(kRangeName)},      {"Fine", F(kFmtCents)},        {"Wave", E(kWaveName)},
     {"PW", F(kFmtPct)},            {"PWM", F(kFmtPct)},           {"LFO Mod", F(kFmtPct)},
     {"Range", E(kRangeName)},      {"Tune", F(kFmtSemi)},         {"Fine", F(kFmtCents)},
@@ -96,6 +99,7 @@ const ParamUi kUi[kParamCount] = {
     {"Rate", F(kFmtLfoHz)},        {"Shape", E(kLfoName)},        {"Keyboard", E(kKeyName)},
     {"Priority", E(kPrioName)},    {"Glide Mode", E(names::kGlide)}, {"Glide Time", F(kFmtSec)},
     {"Volume", F(kFmtPct)},
+    {"Width", F(kFmtPct)},          {"Spread", F(kFmtPct)},
 };
 #undef E
 #undef F
@@ -107,7 +111,7 @@ const uint8_t kSh[] = {kShInput, kShClock, kShRate, kShLag};
 const uint8_t kVcf[] = {kCutoff, kResonance, kFilterMode, kKeyTrack, kEnvAmt, kEnvSrc, kLfoAmt, kShAmt, kHpf};
 const uint8_t kEnv[] = {kVcaEnv, kAttack, kDecay, kSustain, kRelease, kArAttack, kArRelease};
 const uint8_t kLfo[] = {kLfoRate, kLfoShape};
-const uint8_t kCtrl[] = {kKeyboard, kPriority, kGlideMode, kGlideTime, kVolume};
+const uint8_t kCtrl[] = {kKeyboard, kPriority, kGlideMode, kGlideTime, kVolume, uint8_t(kParamCount), uint8_t(kParamCount + 1)};
 
 const Section kSections[] = {
     OT_SYNTH_SECTION("VCO1", "Oscillator 1", kOsc1), OT_SYNTH_SECTION("VCO2", "Oscillator 2", kOsc2),
@@ -121,7 +125,7 @@ const Section kSections[] = {
 extern const SynthDescriptor kAtypeDescriptor;
 const SynthDescriptor kAtypeDescriptor = {audio::atype::kEngineId, "ATYPE", kSynthFlagNotePriority, int8_t(audio::atype::kVolume),
                                          uint8_t(audio::atype::kParamCount), kParams, kUi, kSections,
-                                         uint8_t(sizeof(kSections) / sizeof(kSections[0])), 0, nullptr, "A-Type",
+                                         uint8_t(sizeof(kSections) / sizeof(kSections[0])), 2, kExt, "A-Type",
                                          int8_t(audio::atype::kPriority)};
 
 }  // namespace mod

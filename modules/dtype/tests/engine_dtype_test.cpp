@@ -359,7 +359,7 @@ TEST(dtype_descriptor_is_valid) {
     CHECK_EQ(patchVolumeParam(dtype::kEngineId), int(dtype::kVolume));
     CHECK_STR(patchEngineName(dtype::kEngineId), "DTYPE");
     CHECK_EQ(int(d->sectionCount), synthui::kMaxSections);
-    CHECK_EQ(int(d->extCount), 0);   // mono: no Width
+    CHECK_EQ(int(d->extCount), 2);   // Width, Spread
     // Folder and screen name; in the model list after the Mini models (and JU6 when built).
     CHECK_STR(synthEngineFolder(dtype::kEngineId), "DTYPE");
     CHECK_STR(synthEngineDisplayName(dtype::kEngineId), "D-Type");
@@ -382,7 +382,7 @@ TEST(dtype_descriptor_is_valid) {
         }
         CHECK_EQ(macros, 0);
         for (int j = 0; j < sec.count; ++j) {
-            CHECK(sec.params[j] < kN);
+            CHECK(sec.params[j] < kN + 2);   // + Width, Spread
             if (sec.params[j] < kN) ++seen[sec.params[j]];
         }
     }
