@@ -6,7 +6,7 @@ api     = 1
 entry   = "atypeModule"
 caps    = ["synthEngine"]
 sources = ["atype.cpp", "atype_desc.cpp", "atype_module.cpp"]
-tests   = ["engine_atype_test.cpp"]
+tests   = ["engine_atype_test.cpp", "atype_arp_gate_test.cpp"]
 
 flash_max_bytes   = 12000
 sram_audio_bytes  = 0                 # no static buffers
