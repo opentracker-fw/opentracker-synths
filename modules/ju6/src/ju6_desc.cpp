@@ -40,6 +40,9 @@ const PatchParamRange kParams[kParamCount] = {
     {0, 0, 3},          // Chorus: Off / I / II / I+II (absent in older patches: Off)
 };
 
+// [3.x] extension parameters (patch field 16): Width and Spread, 0..1, 0 = mono.
+const PatchParamRange kExt[2] = {{0.0f, 0.0f, 1.0f, kParamFlagInitAbsent}, {0.0f, 0.0f, 1.0f, kParamFlagInitAbsent | kParamFlagSpread}};
+
 const char* const kPwmName[2] = {"Manual", "LFO"};
 const char* const kHpfName[4] = {"0 Boost", "1 Flat", "2", "3"};
 const char* const kVcaName[2] = {"Env", "Gate"};
@@ -47,7 +50,7 @@ const char* const kChorusName[4] = {"Off", "I", "II", "I+II"};
 
 #define E(n) OT_SYNTH_ENUM(n)
 #define F(f) f, nullptr, 0
-const ParamUi kUi[kParamCount] = {
+const ParamUi kUi[kParamCount + 2] = {
     {"Saw", F(kFmtOnOff)},       {"Pulse", F(kFmtOnOff)},      {"PW", F(kFmtPct)},
     {"PWM", E(kPwmName)},        {"Sub", F(kFmtPct)},          {"Noise", F(kFmtPct)},
     {"Vibrato", F(kFmtPct)},     {"HPF", E(kHpfName)},         {"Cutoff", F(kFmtHz)},
@@ -56,13 +59,14 @@ const ParamUi kUi[kParamCount] = {
     {"Attack", F(kFmtSec)},      {"Decay", F(kFmtSec)},        {"Sustain", F(kFmtPct)},
     {"Release", F(kFmtSec)},     {"LFO Rate", F(kFmtLfoHz)},   {"LFO Delay", F(kFmtSec)},
     {"Volume", F(kFmtPct)},      {"Chorus", E(kChorusName)},
+    {"Width", F(kFmtPct)},       {"Spread", F(kFmtPct)},
 };
 #undef E
 #undef F
 
 const uint8_t kDco[] = {kSaw, kPulse, kPw, kPwMode, kSub, kNoise, kVibrato};
 const uint8_t kVcf[] = {kHpf, kCutoff, kResonance, kEnvAmt, kVcfLfo, kKeyFollow, kVelVcf};
-const uint8_t kVca[] = {kVcaMode, kVolume};
+const uint8_t kVca[] = {kVcaMode, kVolume, uint8_t(kParamCount), uint8_t(kParamCount + 1)};
 const uint8_t kEnv[] = {kAttack, kDecay, kSustain, kRelease};
 const uint8_t kLfo[] = {kLfoRate, kLfoDelay};
 const uint8_t kCho[] = {kChorus};
@@ -78,7 +82,7 @@ const Section kSections[] = {
 extern const SynthDescriptor kJu6Descriptor;
 const SynthDescriptor kJu6Descriptor = {audio::ju6::kEngineId, "JU6", 0, int8_t(audio::ju6::kVolume),
                                        uint8_t(audio::ju6::kParamCount), kParams, kUi, kSections,
-                                       uint8_t(sizeof(kSections) / sizeof(kSections[0])), 0, nullptr};
+                                       uint8_t(sizeof(kSections) / sizeof(kSections[0])), 2, kExt};
 
 }  // namespace mod
 }  // namespace ot

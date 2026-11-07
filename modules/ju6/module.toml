@@ -8,7 +8,7 @@ caps    = ["synthEngine"]
 sources = ["ju6.cpp", "ju6_desc.cpp", "ju6_module.cpp"]
 tests   = ["engine_ju6_test.cpp"]
 
-flash_max_bytes   = 8000              # measured 7,992 B: the shared chorus's I+II mode +960 B
+flash_max_bytes   = 8100              # measured 8,082 B: chorus I+II mode +960 B, Width + Spread rows +82 B
 sram_audio_bytes  = 1536              # the chorus lines: 3 slots x 256 int16 frames
 sdram_bytes       = 0
 fastrun_bytes     = 0

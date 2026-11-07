@@ -303,6 +303,9 @@ TEST(ju6_descriptor_is_valid) {
     CHECK_EQ(patchVolumeParam(ju6::kEngineId), int(ju6::kVolume));
     CHECK_STR(patchEngineName(ju6::kEngineId), "JU6");
     CHECK(d->sectionCount <= synthui::kMaxSections);
+    CHECK_EQ(int(d->extCount), 2);   // Width, Spread
+    CHECK_EQ(synthWidthParam(ju6::kEngineId), kN);
+    CHECK_EQ(synthSpreadParam(ju6::kEngineId), kN + 1);
     // Ranges hold their defaults; enum names match the range; every
     // parameter sits in exactly one section; the macros come last.
     std::vector<int> seen(kN, 0);
@@ -316,7 +319,7 @@ TEST(ju6_descriptor_is_valid) {
         }
         CHECK_EQ(macros, 0);
         for (int k = 0; k < sec.count; ++k) {
-            CHECK(sec.params[k] < kN);
+            CHECK(sec.params[k] < kN + 2);   // + Width, Spread
             if (sec.params[k] < kN) ++seen[sec.params[k]];
         }
     }
