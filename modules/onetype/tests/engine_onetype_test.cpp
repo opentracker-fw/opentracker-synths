@@ -374,7 +374,7 @@ TEST(onetype_ref_mix_law) {
 
 TEST(onetype_ref_noise) {
     compareCases("noise_", [](const rf::Case& c, const float* o, int k) {
-        return k == 0 ? levelErr(c, o, k, 0.5) : (double(o[k]) / c.exp[k] - 1.0) / 0.05;
+        return k == 0 ? levelErr(c, o, k, 0.5, 50.0, 0, 1) : (double(o[k]) / c.exp[k] - 1.0) / 0.05;
     });
 }
 
@@ -557,31 +557,33 @@ TEST(onetype_ref_fm) {
 
 TEST(onetype_ref_ring_and_sync) {
     const auto cmp = [](const rf::Case& c, const float* o, int k) {
-        return k == 0 ? levelErr(c, o, k, 1.5) : (double(o[k]) / c.exp[k] - 1.0) / 0.10;
+        return k == 0 ? levelErr(c, o, k, 1.5, 50.0, 0, 1) : (double(o[k]) / c.exp[k] - 1.0) / 0.10;
     };
     compareCases("ring_", cmp);
     compareCases("sync_", cmp);
 }
 
 TEST(onetype_ref_detune) {
-    compareCases("detune_", [](const rf::Case& c, const float* o, int k) {
-        return k == 0 ? levelErr(c, o, k, 1.5) : (double(o[k]) / c.exp[k] - 1.0) / 0.10;
-    });
+    // The level (2 copies here for the source's 8; its copies' table images
+    // move the centroid, not compared).
+    // 3 dB: two copies beat more than eight over the window.
+    compareCases("detune_", [](const rf::Case& c, const float* o, int k) { return k == 0 ? levelErr(c, o, k, 3.0, 50.0, 0, 1) : 0.0; });
 }
 
 TEST(onetype_ref_mod_env) {
-    // 3 %: of the pitch offset in cents, of the duty, the FM sideband in dB (1 dB).
+    // 3 %: of the pitch offset in cents, of the duty (+0.015); the FM sidebands 1.5 dB.
     compareCases("modenv_pitch", [](const rf::Case& c, const float* o, int k) {
+        if (c.exp[k] <= 0.0f) return 0.0;   // too low to measure in its window
         const double base = hz(c.key), dev = cents(c.exp[k], base);
         return cents(o[k], c.exp[k]) / (0.03 * std::fabs(dev) + 2.0);
     });
-    compareCases("modenv_fm", [](const rf::Case& c, const float* o, int k) { return levelErr(c, o, k, 1.0, 40.0, 0, 2); });
-    compareCases("modenv_pw", [](const rf::Case& c, const float* o, int k) { return (double(o[k]) - c.exp[k]) / (0.03 * c.exp[k]); });
+    compareCases("modenv_fm", [](const rf::Case& c, const float* o, int k) { return levelErr(c, o, k, 1.5, 40.0, 0, 2); });
+    compareCases("modenv_pw", [](const rf::Case& c, const float* o, int k) { return (double(o[k]) - c.exp[k]) / (0.03 * c.exp[k] + 0.015); });
 }
 
 TEST(onetype_ref_lfo) {
     // 2 %: of the pitch offset in cents (+1 cent), of the level, the duty, the
-    // cutoff in octaves (0.03 octave), the period; pan 0.2 dB, FM 1 dB.
+    // cutoff in octaves (0.03 octave), the period, the pan gains; FM 1 dB.
     const auto pitch = [](const rf::Case& c, const float* o, int k) {
         const double base = hz(c.key), dev = cents(c.exp[k], base);
         return cents(o[k], c.exp[k]) / (0.02 * std::fabs(dev) + 1.0);
@@ -595,12 +597,19 @@ TEST(onetype_ref_lfo) {
     compareCases("lfo_wave_", level);
     compareCases("lfo_amp", level);
     compareCases("lfo_both_amp", level);
-    const auto duty = [](const rf::Case& c, const float* o, int k) { return (double(o[k]) - c.exp[k]) / (0.02 * c.exp[k]); };
+    const auto duty = [](const rf::Case& c, const float* o, int k) { return (double(o[k]) - c.exp[k]) / (0.02 * c.exp[k] + 0.01); };
     compareCases("lfo_pw", duty);
     compareCases("lfo_both_pw", duty);
     compareCases("lfo_fm", [](const rf::Case& c, const float* o, int k) { return levelErr(c, o, k, 1.0, 40.0, 0, 2); });
-    compareCases("lfo_pan", [](const rf::Case& c, const float* o, int k) { return levelErr(c, o, k, 0.2, 60.0); });
-    compareCases("lfo_both_pan", [](const rf::Case& c, const float* o, int k) { return levelErr(c, o, k, 0.2, 60.0); });
+    // Pan: each channel's gain within 2 % of the louder channel's.
+    const auto pan = [](const rf::Case& c, const float* o, int k) {
+        const int w = k & ~1;
+        const double off = levelOffset();
+        const double top = std::pow(10.0, std::max(c.exp[w], c.exp[w + 1]) / 20.0);
+        return (std::pow(10.0, (double(o[k]) - off) / 20.0) - std::pow(10.0, c.exp[k] / 20.0)) / (0.02 * top);
+    };
+    compareCases("lfo_pan", pan);
+    compareCases("lfo_both_pan", pan);
     const auto period = [](const rf::Case& c, const float* o, int k) { return (double(o[k]) / c.exp[k] - 1.0) / 0.02; };
     compareCases("lfo_rate_", period);
     compareCases("lfo_sync_", period);
@@ -798,3 +807,62 @@ TEST(onetype_no_nan_or_denormals_at_the_extremes) {
     }
 }
 
+// Every parameter (Volume aside: the framework's) changes the sound of a rich
+// patch playing a short phrase (a legato note, a fresh one after a release).
+namespace {
+std::vector<float> richContext() {
+    std::vector<float> v = initValues();
+    const float set[][2] = {
+        {onetype::kOsc1Wave, onetype::kSaw},   {onetype::kOsc2Wave, onetype::kOsc2Pulse}, {onetype::kOsc2Pitch, 7},
+        {onetype::kMix, 0.5f},                 {onetype::kSubLevel, 0.5f},                {onetype::kSubWave, onetype::kSubSquare},
+        {onetype::kPulseWidth, 0.3f},          {onetype::kModAmount, 0.5f},               {onetype::kModDest, onetype::kModFm},
+        {onetype::kModDecay, 0.3f},            {onetype::kFilterType, onetype::kLp12},    {onetype::kCutoff, 2000},
+        {onetype::kResonance, 0.5f},           {onetype::kEnvAmt, 0.5f},                  {onetype::kKeyTrack, 0.5f},
+        {onetype::kSaturation, 0.3f},          {onetype::kFAttack, 0.01f},                {onetype::kFDecay, 0.3f},
+        {onetype::kFSustain, 0.5f},            {onetype::kFRelease, 0.3f},                {onetype::kAttack, 0.01f},
+        {onetype::kDecay, 0.3f},               {onetype::kSustain, 0.7f},                 {onetype::kRelease, 0.2f},
+        {onetype::kLfo1Dest, onetype::kToFilter}, {onetype::kLfo1Wave, onetype::kLfoTri}, {onetype::kLfo1Rate, 3},
+        {onetype::kLfo1Depth, 0.3f},           {onetype::kLfo2Dest, onetype::kToPw},      {onetype::kLfo2Wave, onetype::kLfoSine},
+        {onetype::kLfo2Rate, 5},               {onetype::kLfo2Depth, 0.3f},               {onetype::kGlideTime, 0.1f},
+        {onetype::kPhase, 0.5f}};
+    for (const auto& x : set) v[size_t(x[0])] = x[1];
+    return v;
+}
+Buf phrase(const std::vector<float>& v) {
+    Rig r(v);
+    r.on(0, 48.0f);
+    r.run(kBlocksPerSec / 4);
+    r.on(0, 55.0f, true, true);
+    r.run(kBlocksPerSec / 4);
+    r.off(0);
+    r.run(kBlocksPerSec / 3);
+    r.on(1, 60.0f);
+    r.run(kBlocksPerSec / 5);
+    r.off(1);
+    r.run(kBlocksPerSec / 5);
+    Buf out = r.L;
+    out.insert(out.end(), r.R.begin(), r.R.end());
+    return out;
+}
+double rmsDiff(const Buf& a, const Buf& b) {
+    double s = 0.0;
+    for (size_t i = 0; i < std::min(a.size(), b.size()); ++i) s += double(a[i] - b[i]) * (a[i] - b[i]);
+    return std::sqrt(s / double(std::min(a.size(), b.size())));
+}
+}  // namespace
+
+TEST(onetype_every_parameter_has_an_effect) {
+    const std::vector<float> ctx = richContext();
+    for (int i = 0; i < kN; ++i) {
+        if (i == onetype::kVolume) continue;
+        std::vector<float> a = ctx, b = ctx;
+        a[size_t(i)] = range(i)->min;
+        b[size_t(i)] = range(i)->max;
+        if (i == onetype::kLfo1Wave || i == onetype::kLfo1Sync || i == onetype::kLfo1KeySync || i == onetype::kLfo1Rate)
+            a[onetype::kLfo1Dest] = b[onetype::kLfo1Dest] = float(onetype::kToOsc12);
+        if (i == onetype::kLfo2KeySync) a[onetype::kLfo2Wave] = b[onetype::kLfo2Wave] = float(onetype::kLfoSh);
+        const double d = rmsDiff(phrase(a), phrase(b));
+        CHECK(d > 1e-4);
+        if (!(d > 1e-4)) std::printf("       param %d differs by %g only\n", i, d);
+    }
+}

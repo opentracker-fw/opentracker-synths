@@ -48,7 +48,7 @@ enum Kind : uint8_t {
     kPitch,     // arg: guess Hz, t0, t1                  -> Hz
     kHarm,      // arg: guess f0, t0, t1, n               -> dB of harmonics 1..n of the measured f0
     kTones,     // arg: nwin, (t0, t1) x nwin, freqs...   -> dB per window and frequency
-    kRmsCent,   // arg: t0, t1, fmax                      -> rms dB, spectral centroid Hz
+    kRmsCent,   // arg: t0, t1, fmax                      -> rms dB, spectral centroid Hz (40 Hz .. fmax)
     kEnv,       // (pulse at key 0) arg: t0, t1 (plateau) -> t90, decay to 1/e, plateau / peak, release to 1/e
     kEnvAt,     // (pulse at key 0) arg: times...         -> level / peak at each time
     kEdges,     // (pulse at key 0) arg: t0, t1           -> mean period of the level's falling edges (s)
@@ -281,8 +281,9 @@ inline int voiceFeatures(const Case& c, const std::vector<float>& L, const std::
             out[0] = float(db(std::sqrt(s / double(n))));
             const std::vector<double> p = power(L, i0, n);
             double num = 0, den = 0;
-            for (size_t k = 1; k < p.size(); ++k) {
+            for (size_t k = 1; k < p.size(); ++k) {   // 40 Hz .. fmax: DC and sub-audio left out
                 const double f = double(k) * fs / double(n);
+                if (f < 40.0) continue;
                 if (f > a[2]) break;
                 num += f * p[k], den += p[k];
             }
@@ -333,6 +334,12 @@ inline int voiceFeatures(const Case& c, const std::vector<float>& L, const std::
         case kDuty: {
             // Rising edges (low -> high) around each time; the cycle's high fraction.
             std::vector<double> up, down;
+            // The note's start counts as a rising edge when it starts high.
+            for (size_t i = 0; i < L.size(); ++i)
+                if (L[i] != 0.0f) {
+                    if (L[i] > 0.0f) up.push_back(double(i) / fs);
+                    break;
+                }
             for (size_t i = 1; i < L.size(); ++i) {
                 if (L[i - 1] < 0 && L[i] >= 0) up.push_back(double(i) / fs);
                 if (L[i - 1] >= 0 && L[i] < 0) down.push_back(double(i) / fs);
@@ -360,20 +367,25 @@ inline int voiceFeatures(const Case& c, const std::vector<float>& L, const std::
             return c.narg - 1;
         }
         case kGlide: {
+            // The pitch per period (semitones) after key 2; the times it passes
+            // 90 % of the interval and comes within 1 cent of the note for good,
+            // interpolated between periods.
             const std::vector<double> z = upCrossings(L, fs);
             const double t2 = double(c.b2) * kBlockFrames / fs;
             const double s0 = 12.0 * std::log2(a[0] / 440.0), s1 = 12.0 * std::log2(a[1] / 440.0);
-            double t90 = -1, tLand = -1;
+            double t90 = -1, tLand = -1, lastT = -1, lastF = 0, lastD = 0;
             for (size_t i = 0; i + 1 < z.size(); ++i) {
                 const double t = 0.5 * (z[i] + z[i + 1]);
                 if (t < t2) continue;
                 const double s = 12.0 * std::log2(1.0 / (z[i + 1] - z[i]) / 440.0);
-                if (t90 < 0 && (s - s0) / (s1 - s0) >= 0.9) t90 = t - t2;
-                if (std::fabs(s - s1) < 0.01) {
-                    if (tLand < 0) tLand = t - t2;
+                const double f = (s - s0) / (s1 - s0), dist = std::fabs(s - s1);
+                if (t90 < 0 && f >= 0.9) t90 = lastT < 0 ? t - t2 : lastT + (t - lastT) * (0.9 - lastF) / (f - lastF) - t2;
+                if (dist < 0.01) {
+                    if (tLand < 0) tLand = lastT < 0 || lastD <= dist ? t - t2 : lastT + (t - lastT) * (lastD - 0.01) / (lastD - dist) - t2;
                 } else {
                     tLand = -1;
                 }
+                lastT = t, lastF = f, lastD = dist;
             }
             out[0] = float(t90);
             out[1] = float(tLand);

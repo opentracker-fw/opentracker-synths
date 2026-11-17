@@ -131,6 +131,64 @@ inline float noiseStep(uint32_t& n) {
     return bit ? kNoiseLevel : -kNoiseLevel;
 }
 
+// Hard sync for the saw and the pulse (audio/va_dsp.h vcoSync in these
+// shapes): the master wrapped x frames ago (0 <= x < 1), so the phase
+// restarts at 0 then; the jump from where it was gets the step residual like
+// any edge. kP: 0 saw, 1 pulse of low part w.
+template <int kP>
+inline float syncNaive(float p, float w) { return kP ? (p < 1.0f - w ? w : w - 1.0f) : 1.0f - 2.0f * p; }
+// The phase from p over dp (<= one frame) ending `age` frames before now:
+// each edge crossed adds its residual. Returns the end phase.
+template <int kP>
+inline float syncRun(float p, float dp, float d, float age, float w, float& before, float& now) {
+    float e = p + dp;
+    const bool wrap = e >= 1.0f;
+    if (!kP) {
+        if (wrap) {
+            e -= 1.0f;
+            va::stepResidual(2.0f, age + e / d, before, now);
+        }
+    } else {
+        const float on = 1.0f - w;
+        if (p < on && e >= on) va::stepResidual(-1.0f, age + (e - on) / d, before, now);
+        if (wrap) {
+            e -= 1.0f;
+            va::stepResidual(1.0f, age + e / d, before, now);
+            if (e >= on) va::stepResidual(-1.0f, age + (e - on) / d, before, now);
+        }
+    }
+    return e;
+}
+template <int kP>
+inline float syncFrame(float& p, float& z, float d, float w, float x) {
+    float out = z, cur = 0.0f;
+    const float q = syncRun<kP>(p, (1.0f - x) * d, d, x, w, out, cur);
+    va::stepResidual(syncNaive<kP>(0.0f, w) - syncNaive<kP>(q, w), x, out, cur);
+    p = syncRun<kP>(0.0f, x * d, d, 0.0f, w, out, cur);
+    z = cur + syncNaive<kP>(p, w);
+    return out;
+}
+
+// --- LFOs ----------------------------------------------------------------------------
+
+// Tempo sync: the cycle in beats for Sync 1..30 (16 bars .. 1/64T).
+constexpr float kSyncBeats[30] = {64.0f, 48.0f, 36.0f, 32.0f,  24.0f,        18.0f, 16.0f,         12.0f, 9.0f,  8.0f,
+                                  6.0f,  4.0f,  3.5f,  3.0f,   2.0f,         1.75f, 1.5f,          4.0f / 3.0f, 1.0f, 0.875f,
+                                  0.75f, 2.0f / 3.0f, 0.5f, 0.375f, 1.0f / 3.0f, 0.25f, 1.0f / 6.0f, 0.125f, 1.0f / 12.0f, 1.0f / 24.0f};
+// An LFO on pitch: cents at full swing for Depth u = i / 64 (the source's law).
+constexpr float kLfoCents[65] = {
+    0.0f,      18.65008f, 46.33075f, 74.16143f, 102.0032f, 129.8409f, 157.6734f, 185.4967f, 214.5106f, 250.5557f, 287.7542f,
+    315.5823f, 352.7851f, 390.0063f, 434.531f,  473.8332f, 511.0213f, 557.6022f, 604.191f,  647.9848f, 697.362f,  750.3214f,
+    796.7277f, 852.5493f, 908.2979f, 964.1663f, 1029.408f, 1090.608f, 1155.638f, 1220.687f, 1290.172f, 1360.148f, 1434.649f,
+    1513.547f, 1592.803f, 1676.691f, 1764.59f,  1853.594f, 1941.4f,   2043.657f, 2140.138f, 2242.395f, 2350.807f, 2459.523f,
+    2577.397f, 2691.858f, 2819.454f, 2942.871f, 3075.3f,   3214.846f, 3354.179f, 3502.95f,  3661.212f, 3819.27f,  3978.982f,
+    4147.698f, 4324.925f, 4510.254f, 4697.168f, 4901.074f, 5097.656f, 5311.523f, 5534.766f, 5758.155f, 6000.0f};
+inline float lfoCents(float u) {
+    const float x = clampf(u, 0.0f, 1.0f) * 64.0f;
+    const int i = x < 64.0f ? int(x) : 63;
+    return kLfoCents[i] + (kLfoCents[i + 1] - kLfoCents[i]) * (x - float(i));
+}
+
 // --- envelopes ------------------------------------------------------------------------
 //
 // One step per tick. The attack is linear (its time to full scale); the

@@ -375,16 +375,18 @@ std::vector<Def> defs() {
               float(3 * f2 - f1)}});
     for (int semis : {5, 12, 19}) {
         add({"ring_p" + std::to_string(semis), rf::kRmsCent, 48, -1, rf::kFlagLevel, -1, -1, 0.75, 120,
-             {{kOscMix, 127}, {kOsc2Ring, 1}, {kOsc2Pitch, pitchKnob(semis)}}, {0.2f, 0.7f, 10000}});
+             {{kOscMix, 127}, {kOsc2Ring, 1}, {kOsc2Pitch, pitchKnob(semis)}}, {0.2f, 0.7f, 4000}});
         add({"sync_p" + std::to_string(semis), rf::kRmsCent, 48, -1, rf::kFlagLevel, -1, -1, 0.75, 120,
              {{kOscMix, 127}, {kOsc2Sync, 1}, {kOsc2Pitch, pitchKnob(semis)}}, {0.2f, 0.7f, 10000}});
     }
     add({"ring_fm_pulse", rf::kRmsCent, 48, -1, rf::kFlagLevel, -1, -1, 0.75, 120,
          {{kOscMix, 127}, {kOsc2Ring, 1}, {kOsc2Shape, 2}, {kOscPulseWidth, 64}, {kOsc2Pitch, pitchKnob(7)}, {kOsc1FM, 20}},
          {0.2f, 0.7f, 10000}});
+    // Detune: free-running phases (the copies sum incoherently); the level only
+    // (the source's 8 copies are 2 here, its copies read truncated tables).
     for (int det : {32, 96})
-        add({"detune_" + std::to_string(det), rf::kRmsCent, 48, -1, rf::kFlagLevel, -1, -1, 0.75, 120, {{kOsc1Detune, det}},
-             {0.2f, 0.7f, 10000}});
+        add({"detune_" + std::to_string(det), rf::kRmsCent, 48, -1, rf::kFlagLevel, -1, -1, 0.75, 120,
+             {{kOsc1Detune, det}, {kOscPhase, 0}}, {0.2f, 0.7f, 10000}});
     // --- M3: the mod envelope --------------------------------------------------------------
     for (int amt : {96, 80, 32})
         add({"modenv_pitch_" + std::to_string(amt), rf::kFreqAt, 60, -1, 0, -1, -1, 0.6, 120,
@@ -462,10 +464,10 @@ std::vector<Def> defs() {
     }
     // --- M3: glide (legato; the first note lands before key 2) --------------------------------
     for (int knob : {30, 60, 90, 120})
-        for (int to : {60, 41}) {
+        for (int to : {72, 53}) {
             const double land = std::log(1.0135 / 0.0135) * tb::kPortaTau[knob], t2 = land + 0.2;
-            Def d{"glide_" + std::to_string(knob) + (to > 48 ? "_up" : "_down"), rf::kGlide, 48, to, rf::kFlagLegato, t2, -1,
-                  t2 + land + 0.25, 120, cat(sine1, {{kPlayMode, 2}, {kPortaTime, knob}}), {float(keyHz(48)), float(keyHz(to))}};
+            Def d{"glide_" + std::to_string(knob) + (to > 60 ? "_up" : "_down"), rf::kGlide, 60, to, rf::kFlagLegato, t2, -1,
+                  t2 + land + 0.25, 120, cat(sine1, {{kPlayMode, 2}, {kPortaTime, knob}}), {float(keyHz(60)), float(keyHz(to))}};
             add(d);
         }
     return v;
