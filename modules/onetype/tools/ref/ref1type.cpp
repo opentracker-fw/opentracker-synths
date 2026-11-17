@@ -44,6 +44,7 @@
 
 #include "../../src/onetype_params.h"
 #include "../../tests/onetype_features.h"
+#include "../sy1/sy1_map.h"
 
 namespace {
 
@@ -58,79 +59,16 @@ constexpr double kFs = 44100.0;
 
 double svfHz(int knob) { return 16.7 * std::exp2(knob / 12.624); }
 double cutoffHz(int type, int knob) { return type == 1 ? double(tb::kLadderCutoffHz[knob]) : svfHz(knob); }
-double fineCents(int v) { return tb::kFineCents[v]; }
-double attackS(int v) { return tb::kAmpAttackSeconds[v]; }
-double toOnePct(int v) { return 4.6 * tb::kEnvTauSeconds[v]; }   // decay / release: time to 1 % (4.6 taus)
-// FM: the deviation step per sample (1001^u - 1) / 2000, u the stored value.
-double fmUnits(int v) {
-    if (v <= 0) return 0.0;
-    const double dev = double(tb::kFmBeta[v]) * s2::kFmRefInc;
-    return std::log2(1.0 + 2000.0 * dev) / std::log2(1001.0);
-}
-// Saturation: a = aMax (2^(10 s) - 1) / 1023.
-double satUnits(int v) {
-    const double a = tb::kSaturationA[v], aMax = tb::kSaturationA[127];
-    return std::log2(1.0 + a * 1023.0 / aMax) / 10.0;
-}
+// Saturation: a = aMax (2^(10 s) - 1) / 1023 (as tools/sy1/sy1_map.h).
+double satUnits(int v) { return onetype_sy1::satUnits(v); }
 double lfoHz(int v) { return s2::Lfo::SpeedHz(v); }
-// Glide: the time to land (4.318 time constants: the aim 1.35 % past the target).
-double glideS(int v) { return v > 0 ? std::log(1.0135 / 0.0135) * tb::kPortaTau[v] : 0.0; }
 
+// The source patch in 1-Type units: the converter's mapping (tools/sy1/sy1_map.h).
 std::vector<float> ours(const s2::PatchValues& v) {
-    using namespace oxo::s2;
+    int32_t raw[s2::kParamCount];
+    for (int i = 0; i < s2::kParamCount; ++i) raw[i] = v[i];
     std::vector<float> o(ty::kParamCount, 0.0f);
-    o[ty::kOsc1Wave] = float(v[kOsc1Shape]);
-    o[ty::kOsc1Detune] = float(v[kOsc1Detune] / 127.0);
-    o[ty::kOsc1Fm] = float(fmUnits(v[kOsc1FM]));
-    o[ty::kSubLevel] = float(v[kSubGain] / 127.0);
-    o[ty::kSubWave] = float(v[kSubShape]);
-    o[ty::kSubOctave] = float(v[kSubOctave]);
-    o[ty::kOsc2Wave] = float(v[kOsc2Shape] - 1);
-    o[ty::kOsc2Pitch] = float(tb::kOsc2PitchSemis[v[kOsc2Pitch]]);
-    o[ty::kOsc2Fine] = float(fineCents(v[kOsc2Fine]));
-    o[ty::kOsc2Track] = float(v[kOsc2KbdTrack]);
-    o[ty::kSync] = float(v[kOsc2Sync]);
-    o[ty::kRing] = float(v[kOsc2Ring]);
-    o[ty::kMix] = float(v[kOscMix] / 127.0);
-    o[ty::kPulseWidth] = float(v[kOscPulseWidth] / 127.0);
-    o[ty::kKeyShift] = float(v[kOscKeyShift]);
-    o[ty::kFineTune] = float(fineCents(v[kOscFineTune]));
-    o[ty::kPhase] = float(v[kOscPhase] / 127.0);
-    const int amt = v[kModEnvAmount];
-    o[ty::kModAmount] = v[kModEnvOn] ? float((amt - 64) / (amt > 64 ? 63.0 : 64.0)) : 0.0f;
-    o[ty::kModAttack] = float(attackS(v[kModEnvAttack]));
-    o[ty::kModDecay] = float(toOnePct(v[kModEnvDecay]));
-    o[ty::kModDest] = float(v[kModEnvDest]);
-    o[ty::kFilterType] = float(v[kFilterType]);
-    o[ty::kCutoff] = float(cutoffHz(v[kFilterType], v[kFilterFreq]));
-    o[ty::kResonance] = float(v[kFilterRes] / 127.0);
-    o[ty::kEnvAmt] = float(std::clamp((v[kFilterAmount] - 64) * 1.984 / 125.0, -1.0, 1.0));
-    o[ty::kKeyTrack] = tb::kKbdTrack[v[kFilterKbdTrack]];
-    o[ty::kSaturation] = float(satUnits(v[kFilterSat]));
-    o[ty::kFAttack] = float(attackS(v[kFilterAttack]));
-    o[ty::kFDecay] = float(toOnePct(v[kFilterDecay]));
-    o[ty::kFSustain] = float(v[kFilterSustain] / 127.0);
-    o[ty::kFRelease] = float(toOnePct(v[kFilterRelease]));
-    o[ty::kAttack] = float(attackS(v[kAmpAttack]));
-    o[ty::kDecay] = float(toOnePct(v[kAmpDecay]));
-    o[ty::kSustain] = tb::kAmpSustainLevel[v[kAmpSustain]];
-    o[ty::kRelease] = float(toOnePct(v[kAmpRelease]));
-    for (int k = 0; k < 2; ++k) {
-        const int b = ty::kLfo1Dest + k * ty::kLfoStride;
-        const int dest = k ? kLfo2Dest : kLfo1Dest, type = k ? kLfo2Type : kLfo1Type, speed = k ? kLfo2Speed : kLfo1Speed;
-        const int depth = k ? kLfo2Depth : kLfo1Depth, on = k ? kLfo2On : kLfo1On;
-        const int sync = k ? kLfo2TempoSync : kLfo1TempoSync, key = k ? kLfo2KeySync : kLfo1KeySync;
-        o[b + ty::kLfoDest] = float(v[dest] - 1);
-        o[b + ty::kLfoWave] = float(v[type]);
-        o[b + ty::kLfoRate] = float(lfoHz(v[speed]));
-        o[b + ty::kLfoDepth] = v[on] ? float(v[depth] / 127.0) : 0.0f;
-        o[b + ty::kLfoSync] = v[sync] ? float(1 + s2::Lfo::SyncStep(v[speed])) : 0.0f;
-        o[b + ty::kLfoKeySync] = float(v[key]);
-    }
-    const int mode = v[kPlayMode], autoG = v[kPortaAuto];
-    o[ty::kGlideMode] = float((mode == 2 ? ty::kLegato : ty::kAlways) + (autoG ? 1 : 0));
-    o[ty::kGlideTime] = float(glideS(v[kPortaTime]));
-    o[ty::kVolume] = std::min(2.0f, tb::kAmpGain[v[kAmpGain]]);
+    onetype_sy1::toOnetype(raw, o.data());
     return o;
 }
 

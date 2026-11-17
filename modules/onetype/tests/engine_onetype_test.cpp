@@ -964,6 +964,6 @@ uint64_t hashOf(const Buf& x) {
 TEST(onetype_golden_hashes) {
     const uint64_t init = hashOf(phrase(initValues())), rich = hashOf(phrase(richContext()));
     std::printf("  1-Type golden: init %016llx, rich %016llx\n", (unsigned long long)init, (unsigned long long)rich);
-    CHECK_EQ(init, uint64_t(0x924ecb15e2ea84e7ull));
+    CHECK_EQ(init, uint64_t(0x7358a7ca1d59627full));
     CHECK_EQ(rich, uint64_t(0x6266afadd1a3f44bull));
 }

@@ -76,13 +76,13 @@ const PatchParamRange kParams[kParamCount] = {
     {1.0437998f, 0, 30},    // Release (s, to 1 %)
     {2, 0, 6},              // LFO1 Dest: Osc2 / Osc1+2 / Filter / Amp / PW / FM / Pan
     {5, 0, 5},              // LFO1 Wave: Saw / Tri / Square / S&H / Smooth / Sine
-    {1.32248f, 0.08f, 130}, // LFO1 Rate (Hz)
+    {1.32211f, 0.08f, 130}, // LFO1 Rate (Hz)
     {0.1496063f, 0, 1},     // LFO1 Depth (0 = off)
     {0, 0, 30},             // LFO1 Sync: Off, 16/1 .. 1/64T
     {0, 0, 1},              // LFO1 Key Sync
     {4, 0, 6},              // LFO2 Dest
     {1, 0, 5},              // LFO2 Wave
-    {3.32259f, 0.08f, 130}, // LFO2 Rate (Hz)
+    {3.32213f, 0.08f, 130}, // LFO2 Rate (Hz)
     {0.503937f, 0, 1},      // LFO2 Depth
     {0, 0, 30},             // LFO2 Sync
     {0, 0, 1},              // LFO2 Key Sync

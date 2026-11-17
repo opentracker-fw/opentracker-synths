@@ -6,7 +6,7 @@ api     = 1
 entry   = "onetypeModule"
 caps    = ["synthEngine"]
 sources = ["onetype.cpp", "onetype_desc.cpp", "onetype_module.cpp"]
-tests   = ["engine_onetype_test.cpp"]
+tests   = ["engine_onetype_test.cpp", "sy1_convert_test.cpp"]
 
 flash_max_bytes   = 27000
 sram_audio_bytes  = 0                 # no static buffers
