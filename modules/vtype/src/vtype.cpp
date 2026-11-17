@@ -58,15 +58,25 @@ inline float absf(float x) { return __builtin_fabsf(x); }
 // ---------------------------------------------------------------------------
 // State.
 
+struct Lfo {
+    float ph;        // phase 0..1
+    float hold;      // S&H value
+    float v0, v1;    // value at the block start / end
+};
+
 struct SlotState {
     uint32_t serial;
     uint8_t valid, hasLast;
     uint8_t count, phase, subWave, glideMode;
     uint8_t o2Wave, sync, t1, t2, routing, curve;
+    uint8_t nmod;
+    uint8_t lfoWave[2], lfoSync[2], lfoKey[2];
+    uint8_t modSrc[kModSlots], modDst[kModSlots], modIdx[kModSlots];
     uint32_t rng;
     va::Contour env[3];   // Amp, Env 1, Env 2 (p.end)
     float glideBlocks;    // glide time in blocks (0 = off)
     float lastPitch;      // the slot's previous note (glide source)
+    Lfo lfo[2];
     // Patch-only values at the block start [0] and end [1].
     float ring[2], noise[2], colour[2], width[2];
 };
@@ -105,8 +115,34 @@ inline float incOf(float pitch, float maxDt) {
     return clampf(440.0f * va::kInvFs * fastExp2((clampf(pitch, -48.0f, 150.0f) - 69.0f) * (1.0f / 12.0f)), 1.0e-7f, maxDt);
 }
 
+// The matrix: the slot's scaled values per destination (Amt at P, sources src).
+VT_PER_BLOCK void matrix(const float* P, const SlotState& S, const float* src, float* m) {
+    for (int j = 0; j < kDstCount; ++j) m[j] = 0.0f;
+    for (int j = 0; j < S.nmod; ++j) {
+        const int k = S.modIdx[j], dst = S.modDst[j];
+        const float a = P[modAmt(k)];
+        float x = a * src[S.modSrc[j]];
+        switch (dst) {
+            case kDstPitch:
+            case kDstO2Pitch: x *= kModSemi * absf(a); break;
+            case kDstCutoff1:
+            case kDstCutoff2: x *= kModOct; break;
+            case kDstCutoff12:
+                m[kDstCutoff1] += kModOct * x;
+                m[kDstCutoff2] += kModOct * x;
+                continue;
+            case kDstOscBalance:
+            case kDstFltBalance: x *= 2.0f; break;
+            case kDstPw: x *= kModPw; break;
+            default: break;
+        }
+        m[dst] += x;
+    }
+}
+
 VT_PER_BLOCK void evalDest(const float* P, const SlotState& S, const float* src, float pitch, float bend, float cutOct, Dest& d) {
-    float m[kDstCount] = {};
+    float m[kDstCount];
+    matrix(P, S, src, m);
     const float pc = pitch + P[kKeyShift] + 0.01f * P[kFineTune] + bend + m[kDstPitch];
     d.dtc = incOf(pc, kMaxDtC);
     d.dt2 = incOf(pc + P[kO2Semi] + 0.01f * P[kO2Fine] + m[kDstO2Pitch], va::kMaxDt);
@@ -473,6 +509,19 @@ void outSplit(const float* x, const float* y, MixRamp m, float w, float dw, floa
 }
 
 // ---------------------------------------------------------------------------
+// LFO shapes (phase 0..1 -> -1..1).
+
+VT_PER_BLOCK float lfoShape(int wave, float ph, float hold) {
+    switch (wave) {
+        case kTri: return ph < 0.25f ? 4.0f * ph : (ph < 0.75f ? 2.0f - 4.0f * ph : 4.0f * ph - 4.0f);
+        case kSine: return va::sinePar(ph);
+        case kRampUp: return ph + ph - 1.0f;
+        case kRampDown: return 1.0f - ph - ph;
+        case kSquare: return ph < 0.5f ? 1.0f : -1.0f;
+        default: return hold;
+    }
+}
+
 // The colour one-pole's coefficient and mode (-1 low pass, +1 high pass, 0 white).
 inline float colourCoef(float c, int& mode) {
     mode = c < 0.0f ? -1 : (c > 0.0f ? 1 : 0);
@@ -494,10 +543,27 @@ public:
         sc.as<SlotState>().rng = 0x6C8E9CF5u;
     }
 
+    void setTempo(float bpm) override {
+        if (bpm > 0.0f) bpm_ = bpm;
+    }
+
     VT_PER_BLOCK void prepare(SynthSlotScratch& sc, const SynthParams& p) override {
         if (p.count < kParamCount) return;
         SlotState& S = sc.as<SlotState>();
         if (!S.valid || S.serial != p.serial) refresh(S, p);
+        // The LFOs (one per slot): a block's step at the song tempo or their rate.
+        for (int l = 0; l < 2; ++l) {
+            Lfo& L = S.lfo[l];
+            const int s = S.lfoSync[l];
+            const float hz = s ? bpm_ * (1.0f / 60.0f) / kSyncBeats[s] : clampf(p.end[kL1Rate + kLfoStride * l], 0.05f, 50.0f);
+            L.v0 = lfoShape(S.lfoWave[l], L.ph, L.hold);
+            L.ph += hz * va::kBlockT;
+            if (L.ph >= 1.0f) {
+                L.ph -= float(int(L.ph));
+                L.hold = va::lcg(S.rng);
+            }
+            L.v1 = lfoShape(S.lfoWave[l], L.ph, L.hold);
+        }
         for (int e = 0; e < 2; ++e) {
             const float* P = e ? p.end : p.start;
             S.ring[e] = clampf(P[kRing], 0.0f, 1.0f);
@@ -542,6 +608,11 @@ public:
         const bool legato = (mode == kLegato || mode == kLegatoOverlap) && n.overlap;
         if (!legato || V.st[0] == va::kIdle) {
             for (uint8_t& s : V.st) s = va::kAtt;
+            for (int l = 0; l < 2; ++l)
+                if (S.lfoKey[l]) {
+                    S.lfo[l].ph = 0.0f;
+                    S.lfo[l].hold = va::lcg(S.rng);
+                }
             if (S.phase == kPhaseReset) {
                 for (int k = 0; k < kMaxSaws; ++k) V.ph[k] = float(k) * (1.0f / float(kMaxSaws));
                 V.flags = uint8_t(V.flags & ~(kSubPar | kHi2));
@@ -583,12 +654,28 @@ private:
         S.t2 = uint8_t(enumOf(E[kF2Type], 3));
         S.routing = uint8_t(enumOf(E[kRouting], 3));
         S.curve = uint8_t(enumOf(E[kCurve], 2));
+        for (int l = 0; l < 2; ++l) {
+            const int b = kL1Rate + kLfoStride * l;
+            S.lfoWave[l] = uint8_t(enumOf(E[b + 1], 5));
+            S.lfoSync[l] = uint8_t(enumOf(E[b + 2], 15));
+            S.lfoKey[l] = E[b + 3] >= 0.5f;
+        }
+        S.nmod = 0;
+        for (int k = 0; k < kModSlots; ++k) {
+            if (E[modAmt(k)] == 0.0f && p.start[modAmt(k)] == 0.0f) continue;
+            S.modIdx[S.nmod] = uint8_t(k);
+            S.modSrc[S.nmod] = uint8_t(enumOf(E[modSrc(k)], kSrcCount - 1));
+            S.modDst[S.nmod] = uint8_t(enumOf(E[modDest(k)], kDstCount - 1));
+            ++S.nmod;
+        }
         va::setContour(S.env[0], E[kAmpA], E[kAmpD], E[kAmpS], E[kAmpR]);
         va::setContour(S.env[1], E[kE1A], E[kE1D], E[kE1S], E[kE1R]);
         va::setContour(S.env[2], E[kE2A], E[kE2D], E[kE2S], E[kE2R]);
         const float gt = clampf(E[kGlideTime], 0.0f, 3.0f);
         S.glideBlocks = gt < 0.0005f ? 0.0f : (gt < va::kBlockT ? 1.0f : gt / va::kBlockT);
     }
+
+    float bpm_ = 120.0f;
 };
 
 VT_PER_BLOCK bool VtypeEngine::render(SynthVoice& v, const SynthParams& p, float g0, float gInc, float* L, float* R) {
@@ -602,7 +689,7 @@ VT_PER_BLOCK bool VtypeEngine::render(SynthVoice& v, const SynthParams& p, float
     // 1. destinations at the block start, 2. one block of envelopes and glide, 3. at the end.
     Dest d0, d1;
     {
-        const float src[kSrcCount] = {V.env[0], V.env[1], V.env[2], 0.0f, 0.0f};
+        const float src[kSrcCount] = {V.env[0], V.env[1], V.env[2], S.lfo[0].v0, S.lfo[1].v0};
         evalDest(p.start, S, src, V.pitch, v.bendStart, v.cutoffOct, d0);
     }
     for (int e = 0; e < 3; ++e) V.env[e] = va::step(V.st[e], V.env[e], S.env[e]);
@@ -616,7 +703,7 @@ VT_PER_BLOCK bool VtypeEngine::render(SynthVoice& v, const SynthParams& p, float
         }
     }
     {
-        const float src[kSrcCount] = {V.env[0], V.env[1], V.env[2], 0.0f, 0.0f};
+        const float src[kSrcCount] = {V.env[0], V.env[1], V.env[2], S.lfo[0].v1, S.lfo[1].v1};
         evalDest(p.end, S, src, V.pitch, v.bend, v.cutoffOct, d1);
     }
 

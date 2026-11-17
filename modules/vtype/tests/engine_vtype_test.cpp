@@ -24,7 +24,7 @@ namespace {
 
 // Milestones whose laws the engine implements (tests of later ones report
 // themselves as pending).
-constexpr int kDone = 3;
+constexpr int kDone = 4;
 bool pending(int milestone) {
     if (milestone <= kDone) return false;
     std::printf("  pending (M%d)\n", milestone);
@@ -919,13 +919,14 @@ EnvRun envRun(int which, double a, double d, double s, double rel, double hold) 
         for (double x : pk) top = std::max(top, x);
         for (double x : pk) out.e.push_back(x / top);
     } else {
-        const double full = pk.size() > 3 ? pk[2] : 1.0;   // gain 1 - env at env 0 (attack starts at 0)
         Vals ref = probe();
         ref[vt::kAmpA] = 0.0f;
         ref[vt::kAmpS] = 1.0f;
         const double g = peak(held(ref, 81.0f, 0.2));
-        for (double x : pk) out.e.push_back(1.0 - x / g);
-        (void)full;
+        // After the note off the amp envelope releases too (10 s): divided out.
+        const double amp = std::exp(-4.6 * double(kBlock) / kFs / 10.0);
+        for (size_t b = 0; b < pk.size(); ++b)
+            out.e.push_back(1.0 - pk[b] / (g * (b > out.offAt ? std::pow(amp, double(b - out.offAt)) : 1.0)));
     }
     return out;
 }
@@ -940,7 +941,8 @@ TEST(vtype_envelopes) {
     if (pending(4)) return;
     int bad = 0;
     auto near = [&bad](const char* what, int which, double want, double got) {
-        if (std::fabs(got / want - 1.0) > 0.03 + 0.006 / want) {
+        // Block-rate envelopes read by block peaks: 3 % and a few blocks.
+        if (std::fabs(got - want) > 0.03 * want + 6.0 * kBlock / kFs) {
             ++bad;
             std::printf("       env %d %s: %.3f s, want %.3f\n", which, what, got, want);
         }
@@ -1115,7 +1117,7 @@ Vals matrixContext() {
     c[vt::kF2Type] = float(vt::kBp12);
     c[vt::kF2Cutoff] = 2500.0f;
     c[vt::kF2Reso] = 0.3f;
-    c[vt::kDrive] = 0.3f;
+    c[vt::kDrive] = 0.35f;
     for (int base : {int(vt::kAmpA), int(vt::kE1A), int(vt::kE2A)}) {
         c[size_t(base)] = 0.0f;
         c[size_t(base + 1)] = 0.0f;
@@ -1128,6 +1130,17 @@ Vals matrixContext() {
         c[size_t(b + 3)] = 1.0f;
     }
     return c;
+}
+// Relative distance of two magnitude spectra (80 log-spaced lines, 60 Hz .. 6 kHz).
+double specDiff(const Buf& a, const Buf& b) {
+    double num = 0.0, den = 0.0;
+    for (int k = 0; k < 80; ++k) {
+        const double f = 60.0 * std::pow(100.0, k / 79.0);
+        const double x = level(a, f), y = level(b, f);
+        num += (x - y) * (x - y);
+        den += y * y;
+    }
+    return std::sqrt(num / std::max(den, 1e-12));
 }
 double srcValue(int src) { return src <= vt::kSrcEnv2 ? 0.6 : 1.0; }
 // The static patch for dest += value (false: Volume, compared by level).
@@ -1195,8 +1208,10 @@ TEST(vtype_matrix_against_the_scale_table) {
                 Vals s = matrixContext();
                 applyStatic(s, dest, v);
                 const Buf want = held(s, 57.0f, 0.4);
-                const double d = rmsDiff(got, want) / std::max(rms(want), 1e-6);
-                if (d > 0.03) {
+                // An envelope's attack moves the phases on the way (Pitch, Detune): compare spectra there.
+                const bool phase = src <= vt::kSrcEnv2 && (dest == vt::kDstPitch || dest == vt::kDstO2Pitch || dest == vt::kDstDetune);
+                const double d = phase ? specDiff(got, want) : rmsDiff(got, want) / std::max(rms(want), 1e-6);
+                if (d > (phase ? 0.1 : 0.03)) {
                     ++bad;
                     std::printf("       src %d dest %d amt %.1f: %.3f off\n", src, dest, amt, d);
                 }
