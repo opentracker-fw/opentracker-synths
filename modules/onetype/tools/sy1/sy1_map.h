@@ -36,6 +36,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -588,6 +589,7 @@ constexpr float kPortaTau[128] = {
 struct Patch {
     std::string name;
     int version = 0;
+    int lines = 0;   // the index,value lines read (0: not a patch)
     int32_t v[kCount];
     bool legacy() const { return version < 112; }
 };
@@ -647,12 +649,13 @@ inline void convertLegacy(int32_t* v, int version) {
 inline Patch parse(const std::string& text) {
     Patch p = defaults();
     bool first = true;
-    size_t pos = 0;
+    size_t pos = text.compare(0, 3, "\xEF\xBB\xBF") == 0 ? 3 : 0;   // a UTF-8 BOM
     while (pos < text.size()) {
         size_t eol = text.find_first_of("\r\n", pos);
         if (eol == std::string::npos) eol = text.size();
         const std::string line = text.substr(pos, eol - pos);
         pos = eol + 1;
+        if (line.find('\0') != std::string::npos) continue;   // not text (UTF-16, binary)
         if (first) {
             p.name = line;
             first = false;
@@ -667,8 +670,10 @@ inline Patch parse(const std::string& text) {
         const size_t comma = line.find(',');
         long id = 0, x = 0;
         if (comma != std::string::npos && parseInt(line.substr(0, comma), id) && parseInt(line.substr(comma + 1), x) && id >= 0 &&
-            id < kCount)
+            id < kCount) {
             p.v[id] = clampValue(int(id), x);
+            ++p.lines;
+        }
     }
     convertLegacy(p.v, p.version);
     return p;
@@ -804,7 +809,7 @@ inline std::vector<std::string> report(const int32_t* v) {
     if (v[kArpOn]) r.push_back("arpeggiator dropped: use the Arp FX");
     if (v[kUnisonOn]) r.push_back("unison dropped: Detune and Spread were raised");
     if (v[kPlayMode]) r.push_back("mono / legato: set the slot's Poly to 1");
-    else r.push_back("poly: set the slot's Poly to " + std::to_string(std::min<int>(v[kPolyphony], 8)));
+    else r.push_back("poly: set the slot's Poly to " + std::to_string(std::min<int>(v[kPolyphony], 6)));   // 6 voices at most
     if (v[kEqTone] != 64 || v[kEqLevel] != 64) r.push_back("EQ dropped");
     if (v[kPan] != 64) r.push_back("pan dropped: use the slot's Pan");
     if (v[kBendRange] != 12) r.push_back("bend range dropped");
@@ -815,15 +820,41 @@ inline std::vector<std::string> report(const int32_t* v) {
     return r;
 }
 
-// A file-system safe patch name from line 1 (24 characters at most).
-inline std::string patchName(const std::string& line) {
+// Line 1 as a file-system safe name (24 characters at most); empty when
+// no real letter or digit is left (Shift-JIS and the like turn into '_').
+inline std::string safeName(const std::string& line) {
     std::string n;
+    bool letter = false;
+    unsigned char prev = 0;
     for (unsigned char c : line) {
         if (n.size() >= 24) break;
-        n += (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == ' ' || c == '-' || c == '_' ? char(c) : '_';
+        const bool alnum = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+        letter = letter || (alnum && prev < 0x80);   // after a byte >= 0x80 it is a multi-byte (Shift-JIS) tail
+        prev = c;
+        n += alnum || c == ' ' || c == '-' || c == '_' ? char(c) : '_';
     }
     while (!n.empty() && n.back() == ' ') n.pop_back();
+    while (!n.empty() && n.front() == ' ') n.erase(n.begin());
+    return letter ? n : std::string();
+}
+inline std::string patchName(const std::string& line) {
+    const std::string n = safeName(line);
     return n.empty() ? std::string("Untitled") : n;
+}
+// A name no earlier file took: line 1's, else the file name's (stem), with
+// " 2", " 3" ... (within 24 characters) when it is taken.
+inline std::string uniqueName(const std::string& line, const std::string& stem, std::set<std::string>& used) {
+    std::string base = safeName(line);
+    if (base.empty()) base = patchName(stem);
+    std::string n = base;
+    for (int k = 2; used.count(n); ++k) {
+        const std::string suffix = " " + std::to_string(k);
+        std::string b = base.substr(0, 24 - suffix.size());
+        while (!b.empty() && b.back() == ' ') b.pop_back();
+        n = b + suffix;
+    }
+    used.insert(n);
+    return n;
 }
 
 }  // namespace onetype_sy1

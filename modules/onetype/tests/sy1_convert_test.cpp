@@ -33,6 +33,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -211,4 +212,46 @@ TEST(sy1_a_converted_patch_validates_and_round_trips) {
     CHECK(unison);
     const std::string name = sy::patchName("Lead/Mk*2  ");
     CHECK_STR(name.c_str(), "Lead_Mk_2");
+}
+
+// Not a patch: no index,value line at all (empty, random bytes, UTF-16) is
+// refused; a UTF-8 BOM is not part of the name.
+TEST(sy1_refuses_files_without_values) {
+    CHECK_EQ(sy::parse("").lines, 0);
+    static const char bin[] = "\x89PNG\r\n\x1a\n\x00\x01garbage";
+    CHECK_EQ(sy::parse(std::string(bin, sizeof(bin) - 1)).lines, 0);
+    static const char u16[] = "N\0a\0m\0e\0\n\0" "0\0,\0" "1\0\n\0";
+    const std::string utf16(u16, sizeof(u16) - 1);
+    CHECK_EQ(sy::parse(utf16).lines, 0);
+    const sy::Patch bom = sy::parse("\xEF\xBB\xBF" "Bass One\nver=112\n0,1\n");
+    CHECK_EQ(bom.lines, 1);
+    const std::string name = sy::patchName(bom.name);
+    CHECK_STR(name.c_str(), "Bass One");
+}
+
+// Two files with the same name (or the same first 24 characters, or a name
+// that is only replacement characters) get distinct patch names.
+TEST(sy1_patch_names_stay_unique) {
+    std::set<std::string> used;
+    const std::string a = sy::uniqueName("Same Name", "a", used);
+    const std::string b = sy::uniqueName("Same Name", "b", used);
+    const std::string c = sy::uniqueName("A long patch name of more than 24", "c", used);
+    const std::string d = sy::uniqueName("A long patch name of more than 24 too", "d", used);
+    const std::string e = sy::uniqueName("\x83\x78\x81\x5B\x83\x58", "Bank 012", used);   // Shift-JIS
+    const std::string f = sy::uniqueName("\x83\x78\x81\x5B", "Bank 013", used);
+    CHECK_STR(a.c_str(), "Same Name");
+    CHECK_STR(b.c_str(), "Same Name 2");
+    CHECK(c != d);
+    CHECK(c.size() <= 24 && d.size() <= 24);
+    CHECK_STR(e.c_str(), "Bank 012");   // no letter left: the file name
+    CHECK_STR(f.c_str(), "Bank 013");
+    CHECK_EQ(int(used.size()), 6);
+}
+
+// The report suggests a Poly the slot can have (at most 6 voices).
+TEST(sy1_report_suggests_a_playable_poly) {
+    const sy::Patch p = sy::parse("poly\nver=112\n94,16\n");
+    bool six = false;
+    for (const std::string& r : sy::report(p.v)) six = six || r.find("Poly to 6") != std::string::npos;
+    CHECK(six);
 }
