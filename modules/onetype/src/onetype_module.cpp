@@ -12,7 +12,7 @@ extern const SynthDescriptor kOnetypeDescriptor;   // onetype_desc.cpp
 
 namespace {
 
-const ModuleInfo kInfo = {"1TY1", kModuleApi, 100, "1-Type synth", kCapSynthEngine | kCapSynthDescriptor, 0, 0, 0, 36000, 8};
+const ModuleInfo kInfo = {"1TY1", kModuleApi, 100, "1-Type synth", kCapSynthEngine | kCapSynthDescriptor, 0, 0, 0, 45000, 6};
 
 class Module final : public IModule {
 public:
