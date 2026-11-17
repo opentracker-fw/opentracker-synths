@@ -332,6 +332,12 @@ std::vector<Def> defs() {
     for (int fm : {12, 24})
         add({"syncfm_" + std::to_string(fm), rf::kRmsCent, 48, -1, rf::kFlagLevel, -1, -1, 0.75, 120,
              {{kOscMix, 127}, {kOsc2Sync, 1}, {kOsc2Pitch, pitchKnob(7)}, {kOsc1Shape, 0}, {kOsc1FM, fm}}, {0.2f, 0.7f, 4000}});
+    // Sync and FM where osc 1 steps backward (osc 2 resets on every backward
+    // step too: the voice locks): the mean of the output.
+    add({"syncback_tri_fm60", rf::kDc, 48, -1, rf::kFlagLevel, -1, -1, 0.75, 120,
+         {{kOscMix, 127}, {kOsc2Sync, 1}, {kOsc2Shape, 3}, {kOsc1Shape, 0}, {kOsc1FM, 60}}, {0.2f, 0.7f}});
+    add({"syncback_noise_fm70", rf::kDc, 48, -1, rf::kFlagLevel, -1, -1, 0.75, 120,
+         {{kOscMix, 127}, {kOsc2Sync, 1}, {kOsc2Shape, 4}, {kOsc1FM, 70}}, {0.2f, 0.7f}});
     add({"ring_fm_pulse", rf::kRmsCent, 48, -1, rf::kFlagLevel, -1, -1, 0.75, 120,
          {{kOscMix, 127}, {kOsc2Ring, 1}, {kOsc2Shape, 2}, {kOscPulseWidth, 64}, {kOsc2Pitch, pitchKnob(7)}, {kOsc1FM, 20}},
          {0.2f, 0.7f, 10000}});

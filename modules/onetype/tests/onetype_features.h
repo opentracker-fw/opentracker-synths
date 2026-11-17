@@ -57,6 +57,7 @@ enum Kind : uint8_t {
     kGlide,     // arg: from Hz, to Hz                    -> time to 90 %, time to land (s after t2)
     kPeakSpec,  // arg: fmin, fmax, nwin, (t0, t1) x nwin -> spectral peak Hz per window
     kPanLR,     // arg: nwin, (t0, t1) x nwin             -> L, R rms dB per window
+    kDc,        // arg: t0, t1                            -> the mean (DC) of L
     kFiltIr,    // kernel; arg: type, Hz, res, peak (0/1), probes... -> dB at each probe [, peak Hz]
     kSelfOsc,   // kernel; arg: type, Hz, res             -> rms dB, Hz
     kLimSat,    // kernel; arg: sat, levels...            -> output rms dB per input sine level
@@ -430,6 +431,13 @@ inline int voiceFeatures(const Case& c, const std::vector<float>& L, const std::
                 out[2 * w + 1] = float(db(std::sqrt(sr / double(i1 - i0))));
             }
             return 2 * nw;
+        }
+        case kDc: {
+            double sum = 0;
+            const size_t i0 = at(a[0]), i1 = std::min(L.size(), at(a[1]));
+            for (size_t i = i0; i < i1; ++i) sum += L[i];
+            out[0] = float(sum / double(i1 - i0));
+            return 1;
         }
         default: return 0;
     }

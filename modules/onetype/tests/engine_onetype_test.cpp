@@ -587,6 +587,12 @@ TEST(onetype_ref_ring_and_sync) {
     compareCases("ring_", cmp);
     compareCases("sync_", cmp);
     compareCases("syncfm_", cmp);
+    // With FM, osc 1 stepping backward resets osc 2 too: the voice locks on a
+    // DC (the source's rule). The mean within 25 % (after the level offset).
+    compareCases("syncback_", [](const rf::Case& c, const float* o, int k) {
+        const double ours = double(o[k]) / std::pow(10.0, levelOffset() / 20.0);
+        return (ours - c.exp[k]) / (0.25 * std::fabs(c.exp[k]) + 0.005);
+    });
 }
 
 TEST(onetype_ref_detune) {
