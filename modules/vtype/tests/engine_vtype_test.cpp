@@ -24,7 +24,7 @@ namespace {
 
 // Milestones whose laws the engine implements (tests of later ones report
 // themselves as pending).
-constexpr int kDone = 0;
+constexpr int kDone = 1;
 bool pending(int milestone) {
     if (milestone <= kDone) return false;
     std::printf("  pending (M%d)\n", milestone);
@@ -257,7 +257,7 @@ TEST(vtype_saw_harmonics_and_aliasing) {
         }
     }
     // Aliases (folded harmonics) below 5 kHz, against the fundamental.
-    const double pin[2] = {-48.0, -40.0};   // measured -51.6 / -43.6 dB, + 3 dB
+    const double pin[2] = {-67.0, -61.0};   // measured -70.3 / -64.2 dB, + 3 dB
     int i = 0;
     for (float key : {84.0f, 96.0f}) {
         const Buf x = held(plain(), key, 1.0);
