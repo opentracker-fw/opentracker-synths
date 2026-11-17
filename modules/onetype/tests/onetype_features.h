@@ -207,9 +207,13 @@ inline size_t pow2Below(size_t n) {
 inline std::vector<double> flatLevel(const std::vector<float>& x) {
     std::vector<double> e(x.size(), -1.0);
     std::vector<uint8_t> bad(x.size(), 0);
-    for (size_t i = 1; i < x.size(); ++i)
-        if ((x[i] > 0) != (x[i - 1] > 0))
+    int last = 0;   // the sign of the last non-zero sample (silence before the note is no edge)
+    for (size_t i = 0; i < x.size(); ++i) {
+        const int sg = x[i] > 0 ? 1 : (x[i] < 0 ? -1 : 0);
+        if (sg && last && sg != last)
             for (size_t k = i >= 48 ? i - 48 : 0; k < std::min(x.size(), i + 48); ++k) bad[k] = 1;
+        if (sg) last = sg;
+    }
     for (size_t i = 0; i < x.size(); ++i)
         if (!bad[i]) e[i] = std::fabs(double(x[i]));
     return e;

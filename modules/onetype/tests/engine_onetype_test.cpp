@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "audio/governor.h"
 #include "audio/synth_bank.h"
 #include "audio/synth_engine.h"
 #include "audio/synth_params.h"
@@ -422,6 +423,132 @@ TEST(onetype_ref_filter_env_and_key_track) {
     compareCases("keytrack_", cmp);
 }
 
+// The Init patch (LP24) through a SynthBank slot at the default slot gain:
+// one voice about -9 dBFS like the other synths, 4-voice chords below full
+// scale, no clipping.
+namespace {
+struct BankSlot {
+    SynthPatch patch;
+    Governor gov;
+    SynthBank bank;
+    SynthMixInputs in;
+    float L[kBlock], R[kBlock], D[kBlock], V[kBlock];
+    float pk = 0.0f;
+    long clips = 0;
+    BankSlot(int32_t engine, int poly) {
+        mod::ModuleHost::instance().init();
+        gov.setBudget(8);
+        bank.setGovernor(&gov);
+        bank.setStartsPerBlock(0);
+        patchInit(engine, &patch);
+        bank.bindPatch(0, &patch);
+        SynthSlotRecord r = SynthSlotRecord::defaults(0);
+        r.model = uint32_t(SynthModel::ACD);
+        r.polyphony = uint32_t(poly);
+        r.delaySend = 0.0f;
+        r.reverbSend = 0.0f;
+        bank.setSlotRecord(0, r);
+        bank.setSlotEngine(0, engine >= 0x80 ? engine : 0);
+        block();
+    }
+    void block() {
+        for (uint32_t i = 0; i < kBlock; ++i) L[i] = R[i] = D[i] = V[i] = 0.0f;
+        bank.render(in, L, R, D, V, nullptr);
+    }
+    void on(int track, int note) {
+        SynthNoteOn n;
+        n.slot = 0;
+        n.note = uint8_t(note);
+        n.volume = -1;
+        bank.noteOn(track, n);
+    }
+    void off(int track) { bank.noteOff(track, NoteOffMode::Off); }
+    void run(int n) {
+        for (int b = 0; b < n; ++b) {
+            block();
+            for (uint32_t i = 0; i < kBlock; ++i) {
+                const float a = std::max(std::fabs(L[i]), std::fabs(R[i]));
+                pk = std::max(pk, a);
+                if (a >= 1.0f) ++clips;
+            }
+        }
+    }
+};
+const int kChords[4][4] = {{60, 64, 67, 71}, {57, 60, 64, 67}, {48, 55, 60, 64}, {62, 65, 69, 72}};
+float chordPeak(int32_t engine, int voices, long& clips) {
+    BankSlot s(engine, 4);
+    for (int trial = 0; trial < 40; ++trial) {
+        for (int k = 0; k < voices; ++k) s.on(k, kChords[trial % 4][k]);
+        s.run(120);
+        for (int k = 0; k < voices; ++k) s.off(k);
+        s.run(250);
+    }
+    clips = s.clips;
+    return s.pk;
+}
+double dbfs(float x) { return 20.0 * std::log10(x > 1e-9f ? double(x) : 1e-9); }
+}  // namespace
+
+TEST(onetype_level_matches_the_synth_conventions) {
+    long c1 = 0, c4 = 0;
+    const float p1 = chordPeak(onetype::kEngineId, 1, c1);
+    const float p4 = chordPeak(onetype::kEngineId, 4, c4);
+#if defined(OT_MOD_ACD1)
+    long ca = 0;
+    const float pa = chordPeak(kSynthEngineAcd, 1, ca);
+    std::printf("  1-Type Init at -9 dB: 1 voice peak %.1f dBFS (ACD %.1f), 4-voice chords %.1f dBFS\n", dbfs(p1), dbfs(pa), dbfs(p4));
+    CHECK(std::fabs(dbfs(p1) - dbfs(pa)) < 1.5);
+#else
+    std::printf("  1-Type Init at -9 dB: 1 voice peak %.1f dBFS, 4-voice chords %.1f dBFS\n", dbfs(p1), dbfs(p4));
+#endif
+    CHECK(dbfs(p1) < -6.0);
+    CHECK(dbfs(p1) > -20.0);
+    CHECK(dbfs(p4) < -1.0);
+    CHECK_EQ(c1, 0L);
+    CHECK_EQ(c4, 0L);
+}
+
+// SynthVoice::cutoffOct (the track's Performance filter offset, octaves)
+// moves the cutoff inside the engine's clamps; 0 leaves the render as it is.
+namespace {
+std::vector<float> cutRender(int type, float cutHz, float oct) {
+    std::vector<float> v = initValues();
+    v[onetype::kFilterType] = float(type);
+    v[onetype::kCutoff] = cutHz;
+    v[onetype::kEnvAmt] = 0.0f;
+    v[onetype::kLfo1Depth] = 0.0f;
+    v[onetype::kLfo2Depth] = 0.0f;
+    v[onetype::kPhase] = 1.0f / 127.0f;
+    Rig r(v);
+    r.v[0].cutoffOct = oct;
+    r.on(0, 48.0f);
+    r.run(40);
+    return r.L;
+}
+double relDiff(const Buf& a, const Buf& b) {
+    double d = 0, e = 0;
+    for (size_t i = 0; i < a.size(); ++i) d += double(a[i] - b[i]) * (a[i] - b[i]), e += double(a[i]) * a[i];
+    return std::sqrt(d / (e + 1e-30));
+}
+}  // namespace
+
+TEST(onetype_perf_cutoff_offset_moves_the_cutoff) {
+    for (int type : {int(onetype::kLp12), int(onetype::kLp24)}) {
+        const Buf ref = cutRender(type, 400.0f, 0.0f);
+        CHECK(rms(ref) > 1e-4);
+        CHECK(relDiff(ref, cutRender(type, 1600.0f, -2.0f)) < 0.05);
+        CHECK(relDiff(cutRender(type, 3200.0f, 0.0f), cutRender(type, 400.0f, 3.0f)) < 0.05);
+        CHECK(relDiff(ref, cutRender(type, 400.0f, -3.0f)) > 0.1);
+        CHECK(relDiff(ref, cutRender(type, 400.0f, 0.0f)) == 0.0);
+        for (float o : {-9.54f, 9.54f}) {
+            const Buf x = cutRender(type, o > 0 ? 20000.0f : 16.0f, o);
+            bool fin = true;
+            for (float f : x) fin = fin && std::isfinite(f);
+            CHECK(fin);
+        }
+    }
+}
+
 // --- M3: cross modulation, the mod envelope, the LFOs, glide -----------------------------------
 
 TEST(onetype_ref_fm) {
@@ -562,6 +689,7 @@ TEST(onetype_mono_retrigger_restarts_phases) {
 // voice takes the next note (a sine with its square sub an octave down).
 TEST(onetype_a_reused_sounding_voice_does_not_click) {
     std::vector<float> v = flat();
+    v[onetype::kPhase] = 0.0f;   // free running (the source's default)
     v[onetype::kSubLevel] = 1.0f;
     v[onetype::kSubOctave] = 1.0f;
     v[onetype::kAttack] = 0.0156f;
@@ -669,3 +797,4 @@ TEST(onetype_no_nan_or_denormals_at_the_extremes) {
         }
     }
 }
+

@@ -490,10 +490,10 @@ int main(int argc, char** argv) {
             const double g = std::pow(1.0 + std::pow(e / 1.038, 11.54), -0.856 / 11.54);
             std::printf("%.7gf,%s", std::log2(g), i % 8 == 7 ? "\n" : " ");
         }
-        // LP24 feedback compensation on the cutoff axis 16.7 Hz x 2^(k / 12.624), k = 4 i.
-        std::printf("\n// lp24 comp at k = 4 i\n");
-        for (int i = 0; i <= 32; ++i) {
-            const double hz = svfHz(4 * i);
+        // LP24 feedback compensation on the cutoff axis 16.7 Hz x 2^(k / 12.624), k = 2 i.
+        std::printf("\n// lp24 comp at k = 2 i\n");
+        for (int i = 0; i <= 65; ++i) {
+            const double hz = svfHz(2 * i);
             double c = 127;
             for (int j = 0; j < 127; ++j)
                 if (hz <= tb::kLadderCutoffHz[j + 1]) {
