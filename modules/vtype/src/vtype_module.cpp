@@ -12,7 +12,7 @@ extern const SynthDescriptor kVtypeDescriptor;   // vtype_desc.cpp
 
 namespace {
 
-const ModuleInfo kInfo = {"VTY1", kModuleApi, 100, "V-Type synth", kCapSynthEngine | kCapSynthDescriptor, 0, 0, 0, 40000, 6};
+const ModuleInfo kInfo = {"VTY1", kModuleApi, 100, "V-Type synth", kCapSynthEngine | kCapSynthDescriptor, 0, 0, 0, 45000, 6};
 
 class Module final : public IModule {
 public:

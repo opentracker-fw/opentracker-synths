@@ -1,9 +1,11 @@
 // V-Type bench (core tests/bench_api.h): one voice per block incl. prepare,
-// a glide in progress, at note 96 (the Swarm's wraps grow with the pitch).
+// holding a note (the Swarm's and osc 2's wraps grow with the pitch).
 // vtype.unit: the costliest setting (vtype.scan with OT_VTYPE_SCAN: every
 // routing x filter type pair x curve x osc 2 wave x Sync x sub wave on top
-// of the worst modulation); .parallel, .split, .fold, .pad, .init beside it.
+// of the worst modulation at the top pitch, then note, Key Shift and osc 2
+// Semi at those switches); .parallel, .split, .fold, .n96, .pad, .init beside it.
 #include <cstdio>
+#include <initializer_list>
 
 #include "audio/synth_engine.h"
 #include "bench_api.h"
@@ -20,7 +22,8 @@ SynthParams g_p;
 
 void set(int i, float v) { g_p.start[i] = g_p.end[i] = v; }
 
-double runBlocks(int blocks, bool worst) {
+// One voice holding `pitch` (no glide: the pitch the block measures is the note's).
+double runBlocks(int blocks, float pitch) {
     ISynthEngine* e = vt::engine();
     static SynthSlotScratch sc;
     static SynthVoice v;
@@ -32,13 +35,9 @@ double runBlocks(int blocks, bool worst) {
     v.slotScratch = &sc;
     v.gate = true;
     SynthNote n;
-    n.pitch = worst ? 84.0f : 60.0f;
+    n.pitch = pitch;
+    n.note = uint8_t(pitch);
     e->noteOn(v, g_p, n);
-    if (worst) {
-        n.pitch = 96.0f;
-        n.reused = n.overlap = true;
-        e->noteOn(v, g_p, n);
-    }
     for (int b = 0; b < 2; ++b) {   // the envelopes past their first block
         e->prepare(sc, g_p);
         e->render(v, g_p, 0.5f, 0.0f, l, r);
@@ -84,8 +83,7 @@ void worstBase() {
     set(vt::kF2Env, 0.3f);
     set(vt::kDrive, 0.5f);
     set(vt::kCurve, float(vt::kSoft));
-    set(vt::kGlideTime, 3.0f);
-    set(vt::kSplitWidth, 0.7f);
+        set(vt::kSplitWidth, 0.7f);
     set(vt::kL1Rate, 7.0f);
     set(vt::kL2Rate, 0.5f);
     set(vt::kL2Wave, float(vt::kSampleHold));
@@ -98,9 +96,10 @@ void worstBase() {
     }
 }
 
-// The path's switches.
+// The path's switches and the pitch.
 struct Path {
     int route, t1, t2, curve, wave, sync, sub;
+    float note, shift, semi;
 };
 void path(const Path& s) {
     set(vt::kRouting, float(s.route));
@@ -111,11 +110,18 @@ void path(const Path& s) {
     set(vt::kO2Sync, float(s.sync));
     set(vt::kSubWave, float(s.sub));
     set(vt::kFltBalance, s.route == vt::kSerial ? 0.3f : 0.0f);
+    set(vt::kKeyShift, s.shift);
+    set(vt::kO2Semi, s.semi);
+}
+double run(const Path& s, int blocks) {
+    worstBase();
+    path(s);
+    return runBlocks(blocks, s.note);
 }
 
-// vtype.unit's path: the costliest of vtype.scan (38,780 over 8 blocks):
-// Split, LP24 and LP24, Fold, a synced pulse, the sine sub.
-constexpr Path kWorst = {vt::kSplit, vt::kLp24, vt::kLp24, vt::kFold, vt::kO2Pulse, 1, vt::kSubSine};
+// vtype.unit's path: the costliest of vtype.scan (switches at the top
+// pitch, then the pitch at the costliest switches).
+constexpr Path kWorst = {vt::kSplit, vt::kLp24, vt::kLp24, vt::kFold, vt::kO2Pulse, 1, vt::kSubSine, 127.0f, 24.0f, 36.0f};
 
 }  // namespace
 
@@ -133,50 +139,66 @@ void vtypeBench() {
                         for (int wave = 0; wave < 4; ++wave)
                             for (int sync = 0; sync < 2; ++sync)
                                 for (int sub = 0; sub < 2; ++sub) {
-                                    const Path s{route, t1, t2, curve, wave, sync, sub};
-                                    worstBase();
-                                    path(s);
-                                    const double c = runBlocks(8, true);
+                                    const Path s{route, t1, t2, curve, wave, sync, sub, 127.0f, 24.0f, 36.0f};
+                                    const double c = run(s, 8);
                                     if (c > most) {
                                         most = c;
                                         at = s;
                                     }
                                 }
-        std::printf("    vtype.scan %9.1f  (costliest: routing %d, types %d / %d, curve %d, osc 2 wave %d, sync %d, sub %d; not gated)\n",
-                    most, at.route, at.t1, at.t2, at.curve, at.wave, at.sync, at.sub);
+        for (float note : {84.0f, 96.0f, 108.0f, 120.0f, 127.0f})
+            for (float shift : {0.0f, 12.0f, 24.0f})
+                for (float semi : {0.0f, 7.0f, 24.0f, 36.0f}) {
+                    Path s = at;
+                    s.note = note;
+                    s.shift = shift;
+                    s.semi = semi;
+                    const double c = run(s, 8);
+                    if (c > most) {
+                        most = c;
+                        at = s;
+                    }
+                }
+        std::printf("    vtype.scan %9.1f  (costliest: routing %d, types %d / %d, curve %d, osc 2 wave %d, sync %d, sub %d, note %.0f, shift %.0f, semi %.0f; not gated)\n",
+                    most, at.route, at.t1, at.t2, at.curve, at.wave, at.sync, at.sub, double(at.note), double(at.shift), double(at.semi));
     }
 #endif
-    worstBase();
-    path(kWorst);
-    const double worst = runBlocks(blocks, true);
-    worstBase();
-    path(Path{vt::kParallel, vt::kLp24, vt::kLp24, vt::kFold, vt::kO2Pulse, 1, vt::kSubSine});
-    const double par = runBlocks(blocks, true);
-    worstBase();
-    path(Path{vt::kSplit, vt::kLp24, vt::kLp24, vt::kSoft, vt::kO2Pulse, 1, vt::kSubSine});
-    const double split = runBlocks(blocks, true);
-    worstBase();
-    path(Path{vt::kSerial, vt::kLp24, vt::kLp24, vt::kFold, vt::kO2Pulse, 1, vt::kSubSine});
-    const double fold = runBlocks(blocks, true);
+    const double worst = run(kWorst, blocks);
+    Path p = kWorst;
+    p.route = vt::kParallel;
+    const double par = run(p, blocks);
+    p = kWorst;
+    p.curve = vt::kSoft;
+    const double split = run(p, blocks);
+    p = kWorst;
+    p.route = vt::kSerial;
+    const double fold = run(p, blocks);
+    p = kWorst;
+    p.note = 96.0f;
+    p.shift = 0.0f;
+    p.semi = 7.0f;
+    const double n96 = run(p, blocks);
     // A pad: 7 saws, osc 2 saw, Serial LP24 -> HP12, Soft drive, one LFO.
     init();
     set(vt::kCount, 3.0f);
     set(vt::kO2Wave, float(vt::kO2Saw));
     set(vt::kBalance, -0.3f);
     set(vt::kRouting, float(vt::kSerial));
+    set(vt::kFltBalance, 1.0f);
     set(vt::kF2Type, float(vt::kHp12));
     set(vt::kDrive, 0.3f);
     set(vt::modSrc(0), float(vt::kSrcLfo2));
     set(vt::modDest(0), float(vt::kDstCutoff1));
     set(vt::modAmt(0), 0.2f);
-    const double pad = runBlocks(blocks, false);
+    const double pad = runBlocks(blocks, 60.0f);
     init();
-    const double initPatch = runBlocks(blocks, false);
-    std::printf("    vtype.unit %9.1f  (one voice, 7 saws, sine sub, synced pulse with PW from LFO 1, ring, coloured noise, Split LP24 / LP24 at 0.9, Fold drive, 4 matrix slots, glide, note 96, limit 40000 M4 insn)\n",
+    const double initPatch = runBlocks(blocks, 60.0f);
+    std::printf("    vtype.unit %9.1f  (one voice, 7 saws, sine sub, synced pulse with PW from LFO 1, ring, coloured noise, Split LP24 / LP24 at 0.9, Fold drive, 4 matrix slots, note 127 + Key Shift 24, osc 2 +36, limit 45000 M4 insn)\n",
                 worst);
-    std::printf("    vtype.unit.parallel %9.1f  (as vtype.unit, Parallel, limit 40000 M4 insn)\n", par);
-    std::printf("    vtype.unit.split %9.1f  (as vtype.unit, Soft drive, limit 40000 M4 insn)\n", split);
-    std::printf("    vtype.unit.fold %9.1f  (as vtype.unit, Serial LP24 -> LP24, limit 40000 M4 insn)\n", fold);
-    std::printf("    vtype.unit.pad %9.1f  (7 saws, osc 2 saw, Serial LP24 -> HP12, Soft drive, one LFO, limit 28000 M4 insn)\n", pad);
-    std::printf("    vtype.unit.init %9.1f  (the Init patch: 5 saws, Single LP24, limit 16000 M4 insn)\n", initPatch);
+    std::printf("    vtype.unit.parallel %9.1f  (as vtype.unit, Parallel, limit 45000 M4 insn)\n", par);
+    std::printf("    vtype.unit.split %9.1f  (as vtype.unit, Soft drive, limit 45000 M4 insn)\n", split);
+    std::printf("    vtype.unit.fold %9.1f  (as vtype.unit, Serial LP24 -> LP24, limit 45000 M4 insn)\n", fold);
+    std::printf("    vtype.unit.n96 %9.1f  (as vtype.unit at note 96, osc 2 +7, limit 45000 M4 insn)\n", n96);
+    std::printf("    vtype.unit.pad %9.1f  (7 saws, osc 2 saw, Serial LP24 -> HP12, Soft drive, one LFO, note 60, limit 28000 M4 insn)\n", pad);
+    std::printf("    vtype.unit.init %9.1f  (the Init patch: 5 saws, Single LP24, note 60, limit 16000 M4 insn)\n", initPatch);
 }
