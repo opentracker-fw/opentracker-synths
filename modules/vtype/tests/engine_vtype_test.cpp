@@ -22,15 +22,6 @@ using namespace vprobe;
 
 namespace {
 
-// Milestones whose laws the engine implements (tests of later ones report
-// themselves as pending).
-constexpr int kDone = 4;
-bool pending(int milestone) {
-    if (milestone <= kDone) return false;
-    std::printf("  pending (M%d)\n", milestone);
-    return true;
-}
-
 // A plain held tone: one saw (Phase Reset), filter 1 open (LP12 at the top,
 // no resonance, no envelope, no key track), full sustain.
 Vals plain() {
@@ -73,7 +64,7 @@ double outGain() {
 
 }  // namespace
 
-// --- descriptor, patch, idle (M0) -------------------------------------------------------
+// --- descriptor, patch, idle -------------------------------------------------------
 
 TEST(vtype_descriptor_is_valid) {
     mod::ModuleHost::instance().init();
@@ -155,10 +146,9 @@ TEST(vtype_silent_when_idle) {
     CHECK_EQ(peak(r.R), 0.0f);
 }
 
-// --- M1: Swarm, sub, Phase, amp envelope, glide, levels ----------------------------------
+// --- Swarm, sub, Phase, amp envelope, glide, levels ----------------------------------
 
 TEST(vtype_sounds_and_ends) {
-    if (pending(1)) return;
     Rig r(initValues());
     r.on(0, 60.0f);
     r.run(kBlocksPerSec / 4);
@@ -173,7 +163,6 @@ TEST(vtype_sounds_and_ends) {
 }
 
 TEST(vtype_pitch_of_the_centre_saw) {
-    if (pending(1)) return;
     // Count 1, open filter: the saw's zero crossings; Key Shift, Fine Tune and bend move it.
     for (float key : {24.0f, 48.0f, 72.0f, 96.0f}) {
         const Buf x = held(plain(), key, 1.0);
@@ -193,7 +182,6 @@ TEST(vtype_pitch_of_the_centre_saw) {
 }
 
 TEST(vtype_swarm_lines_follow_the_detune_and_mix_laws) {
-    if (pending(1)) return;
     // Harmonic 8 of every saw at its ratio, at the Mix law's level against
     // the centre saw alone (Count 1), key 60, Phase Reset.
     const double h = 8.0, f0 = hzOf(60.0);
@@ -225,7 +213,6 @@ TEST(vtype_swarm_lines_follow_the_detune_and_mix_laws) {
 }
 
 TEST(vtype_swarm_level_holds_against_count_and_mix) {
-    if (pending(1)) return;
     Vals one = plain();
     one[vt::kPhase] = float(vt::kPhaseFree);
     const double ref = rms(held(one, 60.0f, 4.0));
@@ -242,7 +229,6 @@ TEST(vtype_swarm_level_holds_against_count_and_mix) {
 }
 
 TEST(vtype_saw_harmonics_and_aliasing) {
-    if (pending(1)) return;
     // h1..h16 at 2 / (pi n) (to 5 kHz within 0.5 dB, to 12 kHz within 3 dB).
     for (float key : {36.0f, 60.0f, 84.0f}) {
         const Buf x = held(plain(), key, 1.0);
@@ -278,7 +264,6 @@ TEST(vtype_saw_harmonics_and_aliasing) {
 }
 
 TEST(vtype_phase_reset_repeats_free_does_not) {
-    if (pending(1)) return;
     Vals r = initValues();
     r[vt::kPhase] = float(vt::kPhaseReset);
     CHECK(play(r, 57.0f) == play(r, 57.0f));
@@ -296,7 +281,6 @@ TEST(vtype_phase_reset_repeats_free_does_not) {
 }
 
 TEST(vtype_sub_is_locked_one_octave_down) {
-    if (pending(1)) return;
     for (int wave : {vt::kSubSquare, vt::kSubSine})
         for (float key : {36.0f, 60.0f}) {
             Vals v = plain();
@@ -321,7 +305,6 @@ TEST(vtype_sub_is_locked_one_octave_down) {
 }
 
 TEST(vtype_glide_modes_and_legato) {
-    if (pending(1)) return;
     for (int mode = 0; mode < 4; ++mode)
         for (float to : {67.0f, 36.0f}) {
             Vals v = plain();
@@ -367,7 +350,6 @@ TEST(vtype_glide_modes_and_legato) {
 }
 
 TEST(vtype_reused_sounding_voice_does_not_click) {
-    if (pending(1)) return;
     Vals v = initValues();
     v[vt::kAmpA] = 0.05f;   // a gentle attack: the test is about the voice's state, not the patch's snap
     v[vt::kAmpR] = 1.0f;
@@ -394,7 +376,6 @@ TEST(vtype_reused_sounding_voice_does_not_click) {
 }
 
 TEST(vtype_voice_level_and_volume) {
-    if (pending(1)) return;
     Vals v = plain();
     Rig r(v);
     r.on(0, 60.0f);
@@ -407,7 +388,6 @@ TEST(vtype_voice_level_and_volume) {
 }
 
 TEST(vtype_level_matches_the_synth_conventions) {
-    if (pending(1)) return;
     BankSlot s(1);
     for (int k = 0; k < 20; ++k) {
         s.on(0, 45 + 3 * (k % 8));
@@ -434,7 +414,7 @@ TEST(vtype_level_matches_the_synth_conventions) {
     CHECK_EQ(s.clips + c.clips, 0L);
 }
 
-// --- M2: filters, routings, Drive, Env Amt, Key Track ----------------------------------
+// --- filters, routings, Drive, Env Amt, Key Track ----------------------------------
 
 namespace {
 // Osc 2's sine at hz through filter `which` (1: Single, 2: Parallel at Flt
@@ -460,7 +440,6 @@ double openGain(double hz) {
 }  // namespace
 
 TEST(vtype_filter_responses_both_filters) {
-    if (pending(2)) return;
     int bad = 0, n = 0;
     const double cutoffs[12] = {80, 150, 300, 500, 800, 1200, 2000, 3000, 5000, 8000, 12000, 16000};
     for (int which = 1; which <= 2; ++which)
@@ -486,7 +465,6 @@ TEST(vtype_filter_responses_both_filters) {
 }
 
 TEST(vtype_filter_peak_frequency) {
-    if (pending(2)) return;
     // A resonant LP12 / BP12 peaks at the cutoff (2 %): the loudest of a sweep of probes.
     for (int t : {int(vt::kLp12), int(vt::kBp12)})
         for (double fc : {300.0, 1000.0, 3000.0}) {
@@ -504,7 +482,6 @@ TEST(vtype_filter_peak_frequency) {
 }
 
 TEST(vtype_routings) {
-    if (pending(2)) return;
     struct Pair {
         int t1, t2;
         double f1, f2;
@@ -559,7 +536,6 @@ TEST(vtype_routings) {
 }
 
 TEST(vtype_drive_curves) {
-    if (pending(2)) return;
     // The fundamental after Drive against 2^(-2.4 d) curve(2^(4 d) x) for a
     // sine through an open filter 1; Drive 0 is bit-identical to no Drive.
     const double hz = 220.0;
@@ -609,7 +585,6 @@ double cutoffFrom(double gain, double hz) {
 }  // namespace
 
 TEST(vtype_env_amt_key_track_and_performance_cutoff) {
-    if (pending(2)) return;
     int bad = 0;
     auto check = [&bad](const char* what, double want, double got) {
         if (std::fabs(got / want - 1.0) > 0.03) {
@@ -678,10 +653,9 @@ TEST(vtype_env_amt_key_track_and_performance_cutoff) {
     CHECK_EQ(bad, 0);
 }
 
-// --- M3: osc 2, sync, ring, noise, Balance, Split -------------------------------------
+// --- osc 2, sync, ring, noise, Balance, Split -------------------------------------
 
 TEST(vtype_osc2_waves_and_pulse_width) {
-    if (pending(3)) return;
     const double hz = 220.0;
     for (int w = 0; w < 4; ++w) {
         const Buf x = held(probe(w), float(pitchOf(hz)), 1.0);
@@ -722,7 +696,6 @@ TEST(vtype_osc2_waves_and_pulse_width) {
 }
 
 TEST(vtype_sync_and_ring) {
-    if (pending(3)) return;
     // Sync: osc 2 (a non-harmonic ratio) restarts on the centre saw's wraps:
     // its output repeats at the centre's period (a line at f0, none without
     // Sync), and its spectrum moves up with Semi (centroid of 20 lines).
@@ -761,7 +734,6 @@ TEST(vtype_sync_and_ring) {
 }
 
 TEST(vtype_balance_noise_and_colour) {
-    if (pending(3)) return;
     // Balance b: Swarm at sqrt((1 - b) / 2), osc 2 at sqrt((1 + b) / 2).
     const float key = 48.0f;
     Vals base = plain();
@@ -832,7 +804,6 @@ TEST(vtype_balance_noise_and_colour) {
 }
 
 TEST(vtype_split_and_width) {
-    if (pending(3)) return;
     // Split: Swarm + sub through filter 1 on the left, osc 2 + noise through
     // filter 2 on the right; at Width 1 neither leaks (below -60 dB).
     const float key = 48.0f;
@@ -880,7 +851,7 @@ TEST(vtype_split_and_width) {
     }
 }
 
-// --- M4: envelopes, LFOs, matrix, ramps, random sets ----------------------------------
+// --- envelopes, LFOs, matrix, ramps, random sets ----------------------------------
 
 namespace {
 // The level of a held probe per block, with envelope `which` (0 Amp, 1 Env 1,
@@ -938,7 +909,6 @@ double timeTo(const std::vector<double>& e, size_t from, double lvl, bool fallin
 }  // namespace
 
 TEST(vtype_envelopes) {
-    if (pending(4)) return;
     int bad = 0;
     auto near = [&bad](const char* what, int which, double want, double got) {
         // Block-rate envelopes read by block peaks: 3 % and a few blocks.
@@ -1014,7 +984,6 @@ double rampRate(const std::vector<double>& y) {
 }  // namespace
 
 TEST(vtype_lfo_rates_shapes_divisions_and_key_sync) {
-    if (pending(4)) return;
     for (int lfo = 0; lfo < 2; ++lfo)
         for (double rate : {0.5, 2.0, 7.0}) {
             const double got = rampRate(lfoRun(lfo, vt::kRampUp, rate, 0, 120.0, 4.0));
@@ -1184,7 +1153,6 @@ double scaled(int dest, double amt, double src) {
 }  // namespace
 
 TEST(vtype_matrix_against_the_scale_table) {
-    if (pending(4)) return;
     int bad = 0;
     for (int src = 0; src < vt::kSrcCount; ++src)
         for (int dest = 0; dest < vt::kDstCount; ++dest)
@@ -1231,7 +1199,6 @@ TEST(vtype_matrix_against_the_scale_table) {
 }
 
 TEST(vtype_moved_parameters_ramp_without_a_click) {
-    if (pending(4)) return;
     struct Jump {
         int param;
         float a, b;
@@ -1277,7 +1244,6 @@ TEST(vtype_moved_parameters_ramp_without_a_click) {
 }
 
 TEST(vtype_chord_is_the_sum_of_its_voices) {
-    if (pending(4)) return;
     Vals v = initValues();
     v[vt::kPhase] = float(vt::kPhaseReset);
     v[vt::kO2Wave] = float(vt::kO2Pulse);
@@ -1297,7 +1263,6 @@ TEST(vtype_chord_is_the_sum_of_its_voices) {
 }
 
 TEST(vtype_no_nan_or_denormals) {
-    if (pending(4)) return;
     uint32_t seed = 139;
     auto rnd = [&seed]() {
         seed = seed * 1664525u + 1013904223u;
@@ -1402,7 +1367,6 @@ Buf sequence(const Vals& vals, Buf* right = nullptr) {
 }  // namespace
 
 TEST(vtype_every_parameter_has_an_effect) {
-    if (pending(4)) return;
     const Vals ctx = richContext();
     for (int i = 0; i < kN; ++i) {
         if (i == vt::kVolume) continue;
@@ -1479,11 +1443,10 @@ uint64_t bankHash() {
 }  // namespace
 
 TEST(vtype_golden_hashes) {
-    if (pending(5)) return;
     Buf right;
     const Buf left = sequence(richContext(), &right);
     const uint64_t e = hashOf(left) ^ (hashOf(right) * 3), b = bankHash();
     std::printf("  V-Type golden: engine %016llx, bank %016llx\n", (unsigned long long)e, (unsigned long long)b);
-    CHECK_EQ(e, uint64_t(0x0ull));
-    CHECK_EQ(b, uint64_t(0x0ull));
+    CHECK_EQ(e, uint64_t(0x442a9424a491242aull));
+    CHECK_EQ(b, uint64_t(0xb43cfca933a7aae6ull));
 }

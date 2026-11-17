@@ -8,11 +8,11 @@ caps    = ["synthEngine"]
 sources = ["vtype.cpp", "vtype_desc.cpp", "vtype_module.cpp"]
 tests   = ["engine_vtype_test.cpp"]
 
-flash_max_bytes   = 24000
+flash_max_bytes   = 24000             # vtype.otm 21,976 B with its hot row (image 20,656 B)
 sram_audio_bytes  = 0                 # no static buffers
 sdram_bytes       = 0
 fastrun_bytes     = 0
-cpu_insn_per_unit = 40000             # bench-m4 limit per voice (vtype.unit)
+cpu_insn_per_unit = 40000             # bench-m4 limit per voice (vtype.unit 38,768: the costliest path of vtype.scan)
 max_units         = 6
 bench             = "vtype"
 engines           = [139]             # 0x8B: a module engine (not a Tracker Mini model)
