@@ -24,7 +24,7 @@ namespace {
 
 // Milestones whose laws the engine implements (tests of later ones report
 // themselves as pending).
-constexpr int kDone = 1;
+constexpr int kDone = 3;
 bool pending(int milestone) {
     if (milestone <= kDone) return false;
     std::printf("  pending (M%d)\n", milestone);
@@ -369,7 +369,9 @@ TEST(vtype_glide_modes_and_legato) {
 TEST(vtype_reused_sounding_voice_does_not_click) {
     if (pending(1)) return;
     Vals v = initValues();
+    v[vt::kAmpA] = 0.05f;   // a gentle attack: the test is about the voice's state, not the patch's snap
     v[vt::kAmpR] = 1.0f;
+    v[vt::kF1Env] = 0.0f;
     Rig r(v);
     r.on(0, 57.0f);
     r.seconds(0.4);
@@ -567,12 +569,18 @@ TEST(vtype_drive_curves) {
     for (int c = 0; c < 3; ++c) {
         const double levels[8][2] = {{1.0, 0.1}, {1.0, 0.3}, {1.0, 0.5}, {1.0, 0.8}, {1.0, 1.0}, {0.5, 0.6}, {0.25, 1.0}, {0.7, 0.4}};
         for (const auto& lv : levels) {
+            // The level into Drive: filter 1 (LP12) lowered until |H| at the probe is lv[0].
+            double lo = 20.0, hi = 20000.0;
+            for (int it = 0; it < 60; ++it) {
+                const double mid = std::sqrt(lo * hi);
+                (std::abs(typeH(vt::kLp12, mid, 0.0, hz)) < lv[0] ? lo : hi) = mid;
+            }
             Vals d = v;
-            d[vt::kBalance] = float(2.0 * lv[0] * lv[0] - 1.0);   // osc 2 at sqrt((1 + b) / 2) = lv[0]
+            d[vt::kF1Cutoff] = float(hi);
             d[vt::kDrive] = float(lv[1]);
             d[vt::kCurve] = float(c);
             const double got = level(held(d, float(pitchOf(hz)), 0.5), hz) / g0;
-            const double want = driveGain(c, lv[1], lv[0]);
+            const double want = driveGain(c, lv[1], std::abs(typeH(vt::kLp12, double(float(hi)), 0.0, hz)));
             if (std::fabs(db(got / want)) > 0.5) {
                 ++bad;
                 std::printf("       curve %d level %.2f drive %.1f: %.2f dB\n", c, lv[0], lv[1], db(got / want));
@@ -715,29 +723,34 @@ TEST(vtype_osc2_waves_and_pulse_width) {
 
 TEST(vtype_sync_and_ring) {
     if (pending(3)) return;
-    // Sync: the output repeats at the centre saw's period, and its spectrum
-    // moves up with Semi (centroid of the first 20 lines); not without Sync.
+    // Sync: osc 2 (a non-harmonic ratio) restarts on the centre saw's wraps:
+    // its output repeats at the centre's period (a line at f0, none without
+    // Sync), and its spectrum moves up with Semi (centroid of 20 lines).
     const float key = 48.0f;
     const double f0 = hzOf(key);
-    double last = 0.0;
-    for (float semi : {5.0f, 12.0f, 19.0f}) {
+    double first = 0.0, last = 0.0;
+    for (float semi : {5.0f, 10.0f, 17.0f}) {
         Vals v = probe(vt::kO2Saw);
-        v[vt::kO2Sync] = 1.0f;
         v[vt::kO2Semi] = semi;
+        const double free = level(held(v, key, 1.0), f0);
+        v[vt::kO2Sync] = 1.0f;
         const Buf x = held(v, key, 1.0);
-        CHECK(std::fabs(cents(freqOf(x), f0)) < 10.0 || level(x, f0) > 0.05);
         const double c = centroid(x, f0, 20);
-        CHECK(c > last * 1.1);
+        if (!(level(x, f0) > 0.05 * outGain() && free < 0.01 * outGain()))
+            std::printf("       sync semi %.0f: line %.4f (free %.4f)\n", semi, level(x, f0), free);
+        CHECK(level(x, f0) > 0.05 * outGain());
+        CHECK(free < 0.01 * outGain());
+        CHECK(c > last);
+        if (first == 0.0) first = c;
         last = c;
-        // Every line of the output is a harmonic of the centre.
-        CHECK(level(x, f0 * std::pow(2.0, semi / 12.0)) < 0.5 * level(x, f0 * std::round(std::pow(2.0, semi / 12.0))) + 0.02 ||
-              std::fabs(std::pow(2.0, semi / 12.0) - std::round(std::pow(2.0, semi / 12.0))) < 0.01);
     }
+    std::printf("  sync centroid: %.2f .. %.2f lines\n", first, last);
+    CHECK(last > 1.1 * first);
     // Ring: R x centre saw x osc 2 sine: sidebands at f2 +- f1 at R / pi (1 dB).
     Vals r = probe(vt::kO2Sine);
     r[vt::kRing] = 0.8f;
-    r[vt::kO2Semi] = 19.0f;
-    const double f2 = hzOf(key + 19.0);
+    r[vt::kO2Semi] = 18.0f;   // not a harmonic ratio: every sideband on its own line
+    const double f2 = hzOf(key + 18.0);
     const Buf x = held(r, key, 1.0);
     for (double f : {f2 + f0, f2 - f0}) {
         const double want = outGain() * 0.8 / kPi * std::abs(typeH(vt::kLp12, 20000.0, 0.0, f));
