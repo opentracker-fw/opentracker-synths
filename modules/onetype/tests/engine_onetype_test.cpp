@@ -10,6 +10,29 @@
 // source's own tests (portamento, mono retrigger, a stolen voice, the voice
 // end, the random LFO restart), the Volume contract, the voice level, no
 // NaN or denormals at the extremes, every parameter audible.
+//
+// Derived from Oxo Synth2 (https://github.com/chab/oxo_synth2, commit 6bb4435):
+//
+//   MIT License
+//   Copyright (c) 2026 Francois Chabloz and contributors
+//
+//   Permission is hereby granted, free of charge, to any person obtaining a copy
+//   of this software and associated documentation files (the "Software"), to deal
+//   in the Software without restriction, including without limitation the rights
+//   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+//   copies of the Software, and to permit persons to whom the Software is
+//   furnished to do so, subject to the following conditions:
+//
+//   The above copyright notice and this permission notice shall be included in all
+//   copies or substantial portions of the Software.
+//
+//   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+//   SOFTWARE.
 #include "test.h"
 
 #include <algorithm>
@@ -421,6 +444,8 @@ TEST(onetype_ref_filter_env_and_key_track) {
     const auto cmp = [](const rf::Case& c, const float* o, int k) { return std::log2(double(o[k]) / c.exp[k]) / 0.043; };
     compareCases("fenv_", cmp);
     compareCases("keytrack_", cmp);
+    compareCases("fenv24_", cmp);   // LP24: the source's ladder knob axis
+    compareCases("keytrack24_", cmp);
 }
 
 // The Init patch (LP24) through a SynthBank slot at the default slot gain:
@@ -561,6 +586,7 @@ TEST(onetype_ref_ring_and_sync) {
     };
     compareCases("ring_", cmp);
     compareCases("sync_", cmp);
+    compareCases("syncfm_", cmp);
 }
 
 TEST(onetype_ref_detune) {
@@ -865,4 +891,79 @@ TEST(onetype_every_parameter_has_an_effect) {
         CHECK(d > 1e-4);
         if (!(d > 1e-4)) std::printf("       param %d differs by %g only\n", i, d);
     }
+}
+
+// A parameter that moved (start != end for one block) holds its new value in
+// the blocks after it (the framework clears `moving` without a new serial).
+TEST(onetype_a_moved_parameter_holds_its_new_value) {
+    std::vector<float> v = flat();
+    v[onetype::kOsc1Wave] = float(onetype::kSaw);
+    Rig r(v);
+    r.on(0, 60.0f);
+    r.run(10);
+    r.p.end[onetype::kKeyShift] = 12.0f;
+    r.p.end[onetype::kCutoff] = 3000.0f;
+    r.p.moving = true;
+    ++r.p.serial;
+    r.run(1);
+    r.p.start[onetype::kKeyShift] = 12.0f;
+    r.p.start[onetype::kCutoff] = 3000.0f;
+    r.p.moving = false;   // the same serial
+    const size_t at = r.L.size();
+    r.run(30);
+    const double f = crossHz(r.L, at + 4 * kBlock, r.L.size());
+    std::printf("  after Key Shift 0 -> 12: %.2f Hz (wants %.2f)\n", f, hz(72));
+    CHECK(std::fabs(cents(f, hz(72))) < 5.0);
+    // Block to block the same (no ramp from the old value again).
+    CHECK(std::fabs(rms(r.L, at + 10 * kBlock, at + 20 * kBlock) - rms(r.L, at + 20 * kBlock, at + 30 * kBlock)) < 0.02 * rms(r.L, at, r.L.size()));
+}
+
+// Osc 1's detune spreads its copies as wide as the source's eight (+-1, 3, 5,
+// 7 x 20 cents: 92 cents rms): at Detune 100 % the copies sit +-92 cents out.
+TEST(onetype_detune_is_as_wide_as_the_source) {
+    std::vector<float> v = flat();
+    v[onetype::kOsc1Detune] = 1.0f;
+    v[onetype::kPhase] = 0.0f;
+    Rig r(v);
+    r.on(0, 60.0f);
+    r.run(kBlocksPerSec);
+    const size_t a = size_t(0.2 * kFs), b = r.L.size();
+    const double main = rf::toneAmp(r.L, a, b, hz(60), kFs);
+    const double up = rf::toneAmp(r.L, a, b, hz(60) * std::exp2(92.0 / 1200.0), kFs);
+    const double down = rf::toneAmp(r.L, a, b, hz(60) * std::exp2(-92.0 / 1200.0), kFs);
+    std::printf("  detune 100 %%: main %.4f, +92 cents %.4f, -92 cents %.4f\n", main, up, down);
+    CHECK(up > 0.7 * main && down > 0.7 * main);
+}
+
+// LPDL (the diode ladder) does not fit the CPU budget next to the worst
+// kept case (FM + sync on triangles through LP24 already takes 44,300 of
+// 45,000 instructions): it plays as LP24 with its resonance at 85 %.
+TEST(onetype_lpdl_plays_as_lp24_with_its_resonance_scaled) {
+    std::vector<float> a = richContext(), b = richContext();
+    a[onetype::kFilterType] = float(onetype::kLpdl);
+    a[onetype::kResonance] = 0.8f;
+    b[onetype::kFilterType] = float(onetype::kLp24);
+    b[onetype::kResonance] = 0.8f * 0.85f;
+    CHECK(phrase(a) == phrase(b));
+}
+
+// Golden hashes: the Init patch and the rich context's phrase, bit for bit
+// (a change of the sound must change these on purpose).
+namespace {
+uint64_t hashOf(const Buf& x) {
+    uint64_t h = 1469598103934665603ull;
+    for (float f : x) {
+        uint32_t b;
+        std::memcpy(&b, &f, 4);
+        for (int k = 0; k < 4; ++k) h = (h ^ ((b >> (8 * k)) & 0xFFu)) * 1099511628211ull;
+    }
+    return h;
+}
+}  // namespace
+
+TEST(onetype_golden_hashes) {
+    const uint64_t init = hashOf(phrase(initValues())), rich = hashOf(phrase(richContext()));
+    std::printf("  1-Type golden: init %016llx, rich %016llx\n", (unsigned long long)init, (unsigned long long)rich);
+    CHECK_EQ(init, uint64_t(0x924ecb15e2ea84e7ull));
+    CHECK_EQ(rich, uint64_t(0x6266afadd1a3f44bull));
 }

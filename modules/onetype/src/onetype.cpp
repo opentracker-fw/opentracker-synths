@@ -79,7 +79,7 @@ struct Cont {
     float osc2;          // osc 2 pitch + fine (semitones)
     float gA, gS, gB;    // mix weights: osc 1, sub, osc 2
     float width;         // pulse duty of the low part, 0 .. 0.5
-    float cut;           // cutoff on the knob axis (dsp::knobOfHz)
+    float cut;           // cutoff on the filter's knob axis (dsp::knobOfHz, ladderKnobOfHz)
     float env;           // filter envelope depth (knob units at envelope 1)
     float track;         // key track (knob units per semitone)
     float res;           // resonance 0..1
@@ -114,6 +114,7 @@ struct SlotState {
     float mod;               // mod envelope amount -1..1
     float glideA;            // glide: distance factor per tick (0 = no glide)
     float ringGain;          // the ring product's osc 2 gain
+    float resScale;          // LPDL: plays as LP24 at 85 % of its resonance
     EnvCoef amp, fenv, menv;
     Cont c[2];
     Lfo lfo[2];
@@ -153,7 +154,7 @@ inline float rnd01(uint32_t& seed) {
     return float(seed >> 8) * (1.0f / 16777216.0f);
 }
 
-ONETYPE_PER_BLOCK void contOf(Cont& c, const float* E) {
+ONETYPE_PER_BLOCK void contOf(Cont& c, const float* E, uint8_t kind) {
     c.shift = clampf(E[kKeyShift], -24.0f, 24.0f);
     c.tune = 0.01f * clampf(E[kFineTune], -100.0f, 100.0f);
     c.osc2 = clampf(E[kOsc2Pitch], -60.0f, 60.0f) + 0.01f * clampf(E[kOsc2Fine], -100.0f, 100.0f);
@@ -165,7 +166,7 @@ ONETYPE_PER_BLOCK void contOf(Cont& c, const float* E) {
     c.gS = (1.0f - m) * w * norm;
     c.gB = m * (1.0f - w) * norm;
     c.width = 0.5f * clampf(E[kPulseWidth], 0.0f, 1.0f);
-    c.cut = knobOfHz(clampf(E[kCutoff], 16.0f, 20000.0f));
+    c.cut = kind == kKindSvf ? knobOfHz(clampf(E[kCutoff], 16.0f, 20000.0f)) : ladderKnobOfHz(clampf(E[kCutoff], 16.0f, 20000.0f));
     c.env = 125.0f * clampf(E[kEnvAmt], -1.0f, 1.0f);
     c.track = clampf(E[kKeyTrack], 0.0f, 1.0f) * (kKnobPerOct / 12.0f);
     c.res = clampf(E[kResonance], 0.0f, 1.0f);
@@ -216,15 +217,18 @@ ONETYPE_PER_BLOCK void refresh(SlotState& S, const SynthParams& p) {
     setEnv(S.menv, E[kModAttack], E[kModDecay], 0.0f, E[kModDecay]);
     S.ftype = uint8_t(va::enumOf(E[kFilterType], kLpdl));
     S.kind = kindOf(S.ftype);
+    // LPDL does not fit the CPU budget beside the worst kept case: LP24 with
+    // its resonance scaled.
+    S.resScale = S.ftype == kLpdl ? 0.85f : 1.0f;
     const float r = clampf(E[kResonance], 0.0f, 1.0f);
-    S.svfD = 1.0f - r;
+    S.svfD = svfDamp(r);
     S.svfG = 1.0f - 0.7f * r;
     S.sat = satA(E[kSaturation]);
-    // Osc 1's two copies at +-20 cents x Detune.
+    // Osc 1's two copies at +-92 cents x Detune (the rms spread of the source's eight at +-1, 3, 5, 7 x 20).
     const float det = clampf(E[kOsc1Detune], 0.0f, 1.0f);
     S.detune = det > 0.0f;
-    S.ratio[0] = fastExp2(-20.0f * det * (1.0f / 1200.0f));
-    S.ratio[1] = fastExp2(20.0f * det * (1.0f / 1200.0f));
+    S.ratio[0] = fastExp2(-92.0f * det * (1.0f / 1200.0f));
+    S.ratio[1] = fastExp2(92.0f * det * (1.0f / 1200.0f));
     S.mod = clampf(E[kModAmount], -1.0f, 1.0f);
     S.modDest = uint8_t(va::enumOf(E[kModDest], kModPw));
     for (int k = 0; k < 2; ++k) {
@@ -247,8 +251,8 @@ ONETYPE_PER_BLOCK void refresh(SlotState& S, const SynthParams& p) {
     S.ringGain = S.ringFm ? (S.shape2 == kOsc2Pulse ? 2.0f : (S.shape2 == kOsc2Noise ? 1.0f / kNoiseLevel : 1.0f)) : 1.0f;
     const float gt = clampf(E[kGlideTime], 0.0f, 3.0f);
     S.glideA = gt < 0.0005f ? 0.0f : fastExp2(-va::kLog2e * float(kTick) * kInvFs * kGlideLand / gt);
-    contOf(S.c[0], p.start);
-    contOf(S.c[1], E);
+    contOf(S.c[0], p.start, S.kind);
+    contOf(S.c[1], E, S.kind);
     S.serial = p.serial;
     S.valid = 1;
 }
@@ -286,38 +290,36 @@ inline float step1(float& p, float d, float w, float& z, uint8_t& hi) {
     return out;
 }
 
-// Osc 1 into a; its phase after each frame into ph (the sub's and sync's);
-// kFm: each step + the FM deviation x osc 2 (b).
-template <int K, bool kPh, bool kFm>
-__attribute__((noinline)) void osc1Pass(VoiceState& V, const Point* P, float* a, float* ph, const float* b) {
-    float p = V.ph1, z = V.z1;
-    uint8_t hi = V.hi1;
+// One oscillator (osc 1's numbering: sine, saw, pulse, tri; osc 2 runs its
+// saw, pulse and triangle here too) into out; its phase after each frame
+// into ph when given (osc 1's: the sub reads it). inc: osc 1's or osc 2's.
+template <int K>
+__attribute__((noinline)) void oscPass(float& ph0, float& z0, uint8_t& hi0, const Point* P, float Point::*inc, float* out, float* ph) {
+    float p = ph0, z = z0;
+    uint8_t hi = hi0;
     int n = 0;
     for (int t = 0; t < kTicks; ++t) {
-        float d = P[t].incA, w = P[t].w, f = P[t].fm;
-        const float dd = (P[t + 1].incA - d) * kTickFrac, dw = (P[t + 1].w - w) * kTickFrac, df = (P[t + 1].fm - f) * kTickFrac;
+        float d = P[t].*inc, w = P[t].w;
+        const float dd = (P[t + 1].*inc - d) * kTickFrac, dw = (P[t + 1].w - w) * kTickFrac;
         for (int i = 0; i < kTick; ++i, ++n) {
-            if (kFm) {
-                a[n] = step1<K>(p, clampf(d + f * b[n], -va::kMaxDt, va::kMaxDt), w, z, hi);
-                f += df;
-            } else {
-                p += d;
-                const bool wrap = p >= 1.0f;
-                if (wrap) p -= 1.0f;
-                a[n] = frame<K>(p, d, wrap, w, z, hi);
-            }
-            if (kPh) ph[n] = p;
+            p += d;
+            const bool wrap = p >= 1.0f;
+            if (wrap) p -= 1.0f;
+            out[n] = frame<K>(p, d, wrap, w, z, hi);
+            if (ph) ph[n] = p;
             d += dd;
             w += dw;
         }
     }
-    V.ph1 = p;
-    V.z1 = z;
-    V.hi1 = hi;
+    ph0 = p;
+    z0 = z;
+    hi0 = hi;
 }
 
-// Osc 1's two copies (detune), added into a, then the sum scaled.
-template <int K, bool kFm>
+// Osc 1's two copies (detune), added into a, then the sum scaled; each step
+// + the FM deviation x osc 2 (b; 0 without FM: the source's copies take
+// osc 1's deviation as it is).
+template <int K>
 __attribute__((noinline)) void copiesPass(VoiceState& V, const SlotState& S, const Point* P, float* a, const float* b) {
     float p0 = V.pc[0], p1 = V.pc[1], z0 = V.zc[0], z1 = V.zc[1];
     uint8_t h0 = V.hic[0], h1 = V.hic[1];
@@ -327,14 +329,13 @@ __attribute__((noinline)) void copiesPass(VoiceState& V, const SlotState& S, con
         float d = P[t].incA, w = P[t].w, f = P[t].fm;
         const float dd = (P[t + 1].incA - d) * kTickFrac, dw = (P[t + 1].w - w) * kTickFrac, df = (P[t + 1].fm - f) * kTickFrac;
         for (int i = 0; i < kTick; ++i, ++n) {
-            // (the source: every copy takes osc 1's FM deviation as it is)
-            const float dev = kFm ? f * b[n] : 0.0f;
+            const float dev = f * b[n];
             const float c0 = step1<K>(p0, clampf(d * r0 + dev, -va::kMaxDt, va::kMaxDt), w, z0, h0);
             const float c1 = step1<K>(p1, clampf(d * r1 + dev, -va::kMaxDt, va::kMaxDt), w, z1, h1);
             a[n] = (a[n] + c0 + c1) * gain;
             d += dd;
             w += dw;
-            if (kFm) f += df;
+            f += df;
         }
     }
     V.pc[0] = p0;
@@ -345,99 +346,31 @@ __attribute__((noinline)) void copiesPass(VoiceState& V, const SlotState& S, con
     V.hic[1] = h1;
 }
 
-// Osc 2 into b (osc 2's numbering: saw, pulse, tri, noise); kSync: reset at
-// osc 1's forward wraps (osc 1's phases in ph, from: its phase before the
-// block), band-limited for the saw and the pulse; the noise restarts.
-template <int K, bool kSync>
-__attribute__((noinline)) void osc2Pass(VoiceState& V, const Point* P, float* b, const float* ph, float from) {
-    float p = V.ph2, z = V.z2, prev = from;
-    uint8_t hi = V.hi2;
+// Osc 2's noise into b.
+__attribute__((noinline)) void noisePass(VoiceState& V, float* b) {
     uint32_t nz = V.noise;
-    int n = 0;
-    for (int t = 0; t < kTicks; ++t) {
-        float d = P[t].incB, w = P[t].w;
-        const float dd = (P[t + 1].incB - d) * kTickFrac, dw = (P[t + 1].w - w) * kTickFrac;
-        for (int i = 0; i < kTick; ++i, ++n) {
-            float x = -1.0f;   // osc 1 wrapped x frames ago
-            if (kSync) {
-                const float q = ph[n], step = q - prev;
-                if (step < -0.5f) x = clampf(q / (step + 1.0f), 0.0f, 0.999f);
-                prev = q;
-            }
-            if (K == kOsc2Saw || K == kOsc2Pulse) {
-                if (kSync && x >= 0.0f) {
-                    b[n] = syncFrame<K == kOsc2Saw ? 0 : 1>(p, z, d, w, x);
-                    hi = pulseHi(p, w);
-                } else {
-                    p += d;
-                    const bool wrap = p >= 1.0f;
-                    if (wrap) p -= 1.0f;
-                    b[n] = K == kOsc2Saw ? sawFrame(p, d, wrap, z) : pulseFrame(p, d, wrap, w, z, hi);
-                }
-            } else if (K == kOsc2Tri) {
-                if (kSync && x >= 0.0f) {
-                    p = x * d;   // a naive reset
-                    hi = triHi(p);
-                } else {
-                    p += d;
-                    if (p >= 1.0f) p -= 1.0f;
-                }
-                b[n] = triFrame(p, d, z, hi);
-            } else {
-                if (kSync && x >= 0.0f) nz = kNoiseSeed;
-                b[n] = noiseStep(nz);
-            }
-            d += dd;
-            w += dw;
-        }
-    }
-    V.ph2 = p;
-    V.z2 = z;
-    V.hi2 = hi;
+    for (int n = 0; n < int(kBlock); ++n) b[n] = noiseStep(nz);
     V.noise = nz;
 }
 
-// FM and sync at once: osc 2 (reset by osc 1's last wrap) steps osc 1 frame
-// by frame. Rare; generic in the shapes.
+// FM and / or sync: per frame, osc 2's current value steps osc 1 (FM), then
+// osc 1's drop resets osc 2 in the same frame (sync: a forward wrap, x frames
+// ago; with FM also a backward step that does not wrap, at the frame's end:
+// the source's rule), band-limited for the saw and the pulse; the noise
+// restarts. Generic in the shapes.
 __attribute__((noinline)) void crossPass(VoiceState& V, const SlotState& S, const Point* P, float* a, float* b, float* ph) {
-    float p1 = V.ph1, z1 = V.z1, p2 = V.ph2, z2 = V.z2, x = -1.0f;
+    float p1 = V.ph1, z1 = V.z1, p2 = V.ph2, z2 = V.z2;
     uint8_t h1 = V.hi1, h2 = V.hi2;
     uint32_t nz = V.noise;
+    float noiseNow = (nz & 1u) ? kNoiseLevel : -kNoiseLevel;   // the noise's last bit
+    const bool sync = S.sync, noise = S.shape2 == kOsc2Noise;
     int n = 0;
     for (int t = 0; t < kTicks; ++t) {
         float d1 = P[t].incA, d2 = P[t].incB, w = P[t].w, f = P[t].fm;
         const float dd1 = (P[t + 1].incA - d1) * kTickFrac, dd2 = (P[t + 1].incB - d2) * kTickFrac;
         const float dw = (P[t + 1].w - w) * kTickFrac, df = (P[t + 1].fm - f) * kTickFrac;
         for (int i = 0; i < kTick; ++i, ++n) {
-            float o2;
-            switch (S.shape2) {
-                case kOsc2Saw:
-                    if (x >= 0.0f) o2 = syncFrame<0>(p2, z2, d2, w, x);
-                    else o2 = step1<kSaw>(p2, d2, w, z2, h2);
-                    break;
-                case kOsc2Pulse:
-                    if (x >= 0.0f) {
-                        o2 = syncFrame<1>(p2, z2, d2, w, x);
-                        h2 = pulseHi(p2, w);
-                    } else {
-                        o2 = step1<kPulse>(p2, d2, w, z2, h2);
-                    }
-                    break;
-                case kOsc2Tri:
-                    if (x >= 0.0f) {
-                        p2 = x * d2;
-                        h2 = triHi(p2);
-                        o2 = triFrame(p2, d2, z2, h2);
-                    } else {
-                        o2 = step1<kTri>(p2, d2, w, z2, h2);
-                    }
-                    break;
-                default:
-                    if (x >= 0.0f) nz = kNoiseSeed;
-                    o2 = noiseStep(nz);
-                    break;
-            }
-            b[n] = o2;
+            const float o2 = noise ? noiseNow : z2;   // osc 2 now
             const float s1 = clampf(d1 + f * o2, -va::kMaxDt, va::kMaxDt), before = p1;
             switch (S.shape1) {
                 case kSine: a[n] = step1<kSine>(p1, s1, w, z1, h1); break;
@@ -445,8 +378,41 @@ __attribute__((noinline)) void crossPass(VoiceState& V, const SlotState& S, cons
                 case kPulse: a[n] = step1<kPulse>(p1, s1, w, z1, h1); break;
                 default: a[n] = step1<kTri>(p1, s1, w, z1, h1); break;
             }
-            x = s1 > 0.0f && p1 < before ? clampf(p1 / s1, 0.0f, 0.999f) : -1.0f;
             ph[n] = p1;
+            float x = -1.0f;   // osc 1 dropped x frames ago
+            if (sync) {
+                if (s1 > 0.0f && p1 < before) x = clampf(p1 / s1, 0.0f, 0.999f);
+                else if (s1 < 0.0f && p1 <= before) x = 0.0f;
+            }
+            switch (S.shape2) {
+                case kOsc2Saw:
+                    if (x >= 0.0f) b[n] = syncFrame<0>(p2, z2, d2, w, x);
+                    else b[n] = step1<kSaw>(p2, d2, w, z2, h2);
+                    break;
+                case kOsc2Pulse:
+                    if (x >= 0.0f) {
+                        b[n] = syncFrame<1>(p2, z2, d2, w, x);
+                        h2 = pulseHi(p2, w);
+                    } else {
+                        b[n] = step1<kPulse>(p2, d2, w, z2, h2);
+                    }
+                    break;
+                case kOsc2Tri:
+                    if (x >= 0.0f) {   // a naive reset
+                        const float out = z2;
+                        p2 = x * d2;
+                        h2 = triHi(p2);
+                        z2 = triNaive(p2);
+                        b[n] = out;
+                    } else {
+                        b[n] = step1<kTri>(p2, d2, w, z2, h2);
+                    }
+                    break;
+                default:
+                    if (x >= 0.0f) nz = kNoiseSeed;
+                    b[n] = noiseNow = noiseStep(nz);
+                    break;
+            }
             d1 += dd1;
             d2 += dd2;
             w += dw;
@@ -505,17 +471,11 @@ __attribute__((noinline)) void subPass(VoiceState& V, float from, bool down, flo
     V.parity = par;
 }
 
-using Osc1Fn = void (*)(VoiceState&, const Point*, float*, float*, const float*);
-#define ONETYPE_OSC1(ph, fm) {osc1Pass<kSine, ph, fm>, osc1Pass<kSaw, ph, fm>, osc1Pass<kPulse, ph, fm>, osc1Pass<kTri, ph, fm>}
-const Osc1Fn kOsc1Fn[2][2][4] = {{ONETYPE_OSC1(false, false), ONETYPE_OSC1(false, true)},
-                                 {ONETYPE_OSC1(true, false), ONETYPE_OSC1(true, true)}};
-#undef ONETYPE_OSC1
+using OscFn = void (*)(float&, float&, uint8_t&, const Point*, float Point::*, float*, float*);
+const OscFn kOscFn[4] = {oscPass<kSine>, oscPass<kSaw>, oscPass<kPulse>, oscPass<kTri>};
+constexpr uint8_t kOsc2AsOsc1[3] = {kSaw, kPulse, kTri};
 using CopiesFn = void (*)(VoiceState&, const SlotState&, const Point*, float*, const float*);
-const CopiesFn kCopiesFn[2][4] = {{copiesPass<kSine, false>, copiesPass<kSaw, false>, copiesPass<kPulse, false>, copiesPass<kTri, false>},
-                                  {copiesPass<kSine, true>, copiesPass<kSaw, true>, copiesPass<kPulse, true>, copiesPass<kTri, true>}};
-using Osc2Fn = void (*)(VoiceState&, const Point*, float*, const float*, float);
-const Osc2Fn kOsc2Fn[2][4] = {{osc2Pass<kOsc2Saw, false>, osc2Pass<kOsc2Pulse, false>, osc2Pass<kOsc2Tri, false>, osc2Pass<kOsc2Noise, false>},
-                              {osc2Pass<kOsc2Saw, true>, osc2Pass<kOsc2Pulse, true>, osc2Pass<kOsc2Tri, true>, osc2Pass<kOsc2Noise, true>}};
+const CopiesFn kCopiesFn[4] = {copiesPass<kSine>, copiesPass<kSaw>, copiesPass<kPulse>, copiesPass<kTri>};
 using SubFn = void (*)(VoiceState&, float, bool, float*);
 const SubFn kSubFn[4] = {subPass<kSubSine>, subPass<kSubTri>, subPass<kSubSaw>, subPass<kSubSquare>};
 
@@ -583,6 +543,7 @@ public:
         if (p.count < kParamCount) return;
         SlotState& S = sc.as<SlotState>();
         if (!S.valid || S.serial != p.serial || p.moving) refresh(S, p);
+        if (!p.moving) S.c[0] = S.c[1];   // nothing moves this block (a past move: no ramp from its old value)
         if (!S.lfoInit) lfoStart(S);
         // The LFOs: their values at the block's 9 tick points.
         for (int k = 0; k < 2; ++k) {
@@ -677,19 +638,17 @@ public:
         }
         float a[kBlock], b[kBlock], c[kBlock];
         const float from = V.ph1;
-        const bool sub = S.subOn, fm = S.fmOn, sync = S.sync, ph = sub || sync;
+        const bool sub = S.subOn, fm = S.fmOn;
         if (fm && S.shape2 == kOsc2Noise)   // noise as an FM source is +-0.65
             for (Point& q : P) q.fm *= kNoiseFm;
-        if (fm && sync) {
+        if (fm || S.sync) {
             crossPass(V, S, P, a, b, c);
-        } else if (fm) {
-            kOsc2Fn[0][S.shape2](V, P, b, nullptr, 0.0f);
-            kOsc1Fn[ph][1][S.shape1](V, P, a, c, b);
         } else {
-            kOsc1Fn[ph][0][S.shape1](V, P, a, c, nullptr);
-            kOsc2Fn[sync][S.shape2](V, P, b, c, from);
+            kOscFn[S.shape1](V.ph1, V.z1, V.hi1, P, &Point::incA, a, c);
+            if (S.shape2 == kOsc2Noise) noisePass(V, b);
+            else kOscFn[kOsc2AsOsc1[S.shape2]](V.ph2, V.z2, V.hi2, P, &Point::incB, b, nullptr);
         }
-        if (S.detune) kCopiesFn[fm][S.shape1](V, S, P, a, b);
+        if (S.detune) kCopiesFn[S.shape1](V, S, P, a, b);
         if (sub) kSubFn[S.subShape](V, from, S.subDown, c);
         mixPass(a, b, c, S, sub);
         if (S.kind == kKindSvf) filterPass<kKindSvf>(V.F, a, P, S);
@@ -745,12 +704,21 @@ private:
     // The 9 control points (0 = now, then one tick each: the envelopes and the glide step).
     ONETYPE_PER_BLOCK static void points(Point* P, VoiceState& V, const SlotState& S, const SynthVoice& v) {
         const Cont &c0 = S.c[0], &c1 = S.c[1];
-        const float top = S.kind == kKindSvf ? kSvfTop : kLadderTop;
+        // The Performance offset (octaves) on the filter's knob axis.
+        float perf = 0.0f;
+        if (v.cutoffOct != 0.0f) {
+            if (S.kind == kKindSvf) {
+                perf = v.cutoffOct * kKnobPerOct;
+            } else {
+                const float hz = ladderHz(c1.cut);
+                perf = ladderKnobOfHz(hz * fastExp2(clampf(v.cutoffOct, -12.0f, 12.0f))) - c1.cut;
+            }
+        }
         for (int j = 0; j <= kTicks; ++j) {
             if (j) {
                 V.amp = envStep(V.aSt, V.amp, S.amp);
-                V.fenv = envStep(V.fSt, V.fenv, S.fenv);
-                if (S.mod != 0.0f) V.menv = envStep(V.mSt, V.menv, S.menv);
+                V.fenv = envStepAim(V.fSt, V.fenv, S.fenv);
+                if (S.mod != 0.0f) V.menv = envStepAim(V.mSt, V.menv, S.menv);
                 if (V.pitch != V.target) {   // the source's glide: r -> r a - E (1 - a), lands
                     const float r = __builtin_fabsf(V.pitch - V.target);
                     const float rest = r * S.glideA - V.aim * (1.0f - S.glideA);
@@ -812,7 +780,8 @@ private:
             // Performance offset; the envelope sweeps from 2.1 under it (at 0)
             // to its target at 1, the target clamped (the source's law); an
             // LFO pulls it toward the top.
-            const float fb = lerp(c0.cut, c1.cut, t) + lerp(c0.track, c1.track, t) * (V.target - 48.0f) + v.cutoffOct * kKnobPerOct;
+            const float fb = lerp(c0.cut, c1.cut, t) + lerp(c0.track, c1.track, t) * (V.target - 48.0f) + perf;
+            const float top = kKnobTop;
             const float low = fb - 2.1f;
             float k = low + (clampf(fb + lerp(c0.env, c1.env, t), -2.0f, top) - low) * V.fenv;
             if (cut > 0.0f) k += (top - k > 0.0f ? top - k : 0.0f) * (cut < 1.0f ? cut : 1.0f);
@@ -821,7 +790,7 @@ private:
                 q.k = 0.0f;
             } else {
                 q.c = ladderA(k);
-                q.k = ladderK(k, lerp(c0.res, c1.res, t));
+                q.k = ladderK(k, lerp(c0.res, c1.res, t) * S.resScale);
             }
         }
     }

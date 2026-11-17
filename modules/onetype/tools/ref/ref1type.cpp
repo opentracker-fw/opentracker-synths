@@ -341,6 +341,17 @@ std::vector<Def> defs() {
     for (int kt : {0, 64, 127})
         for (int key : {24, 48, 72, 96})
             peak("keytrack_" + std::to_string(kt) + "_k" + std::to_string(key), key, {{kFilterFreq, 60}, {kFilterKbdTrack, kt}});
+    // The same on LP24 (its own knob axis): a resonant LP24's peak on noise.
+    const auto peak24 = [&](std::string name, int key, std::vector<std::pair<int, int>> nat) {
+        std::vector<std::pair<int, int>> all = {{kOscMix, 127}, {kOsc2Shape, 4}, {kFilterType, 1}, {kFilterRes, 115}};
+        all.insert(all.end(), nat.begin(), nat.end());
+        add({name, rf::kPeakSpec, key, -1, 0, -1, -1, 1.0, 120, all, {20, 18000, 1, 0.1f, 0.95f}});
+    };
+    for (int amt : {44, 64, 84, 104})
+        peak24("fenv24_amount_" + std::to_string(amt), 60, {{kFilterFreq, 50}, {kFilterAmount, amt}});
+    for (int kt : {64, 127})
+        for (int key : {24, 72, 96})
+            peak24("keytrack24_" + std::to_string(kt) + "_k" + std::to_string(key), key, {{kFilterFreq, 60}, {kFilterKbdTrack, kt}});
     // --- M2: filter responses (kernel) ------------------------------------------------------
     static const char* const kType[5] = {"lp12", "lp24", "hp12", "bp12", "lpdl"};
     for (int type = 0; type < 4; ++type)
@@ -379,6 +390,10 @@ std::vector<Def> defs() {
         add({"sync_p" + std::to_string(semis), rf::kRmsCent, 48, -1, rf::kFlagLevel, -1, -1, 0.75, 120,
              {{kOscMix, 127}, {kOsc2Sync, 1}, {kOsc2Pitch, pitchKnob(semis)}}, {0.2f, 0.7f, 10000}});
     }
+    // Sync and FM at once (osc 1 steps by osc 2, osc 2 resets on osc 1's drops).
+    for (int fm : {12, 24})
+        add({"syncfm_" + std::to_string(fm), rf::kRmsCent, 48, -1, rf::kFlagLevel, -1, -1, 0.75, 120,
+             {{kOscMix, 127}, {kOsc2Sync, 1}, {kOsc2Pitch, pitchKnob(7)}, {kOsc1Shape, 0}, {kOsc1FM, fm}}, {0.2f, 0.7f, 4000}});
     add({"ring_fm_pulse", rf::kRmsCent, 48, -1, rf::kFlagLevel, -1, -1, 0.75, 120,
          {{kOscMix, 127}, {kOsc2Ring, 1}, {kOsc2Shape, 2}, {kOscPulseWidth, 64}, {kOsc2Pitch, pitchKnob(7)}, {kOsc1FM, 20}},
          {0.2f, 0.7f, 10000}});
@@ -397,6 +412,12 @@ std::vector<Def> defs() {
              {{kOsc1Shape, 0}, {kOsc2Shape, 3}, {kOsc2Pitch, pitchKnob(7)}, {kOsc1FM, base}, {kModEnvOn, 1}, {kModEnvAmount, amt},
               {kModEnvDecay, 70}, {kModEnvDest, 1}},
              {3, 0.02f, 0.07f, 0.15f, 0.2f, 0.45f, 0.5f, float(f1), float(f1 + f2)}});
+    // The FM offset's tail: the source's envelope aims 1/2048 under 0, so its
+    // dB law falls to 0 with it (decay 50: at 0.25 s).
+    add({"modenv_fmtail_127", rf::kTones, 60, -1, rf::kFlagLevel, -1, -1, 0.4, 120,
+         {{kOsc1Shape, 0}, {kOsc2Shape, 3}, {kOsc2Pitch, pitchKnob(7)}, {kModEnvOn, 1}, {kModEnvAmount, 127}, {kModEnvDecay, 50},
+          {kModEnvDest, 1}},
+         {2, 0.15f, 0.21f, 0.222f, 0.252f, float(f1), float(f1 + f2)}});
     for (int amt : {96, 32, 127})
         add({"modenv_pw_" + std::to_string(amt), rf::kDuty, 12, -1, 0, -1, -1, 0.75, 120,
              {{kOsc1Shape, 2}, {kOscPulseWidth, 64}, {kModEnvOn, 1}, {kModEnvAmount, amt}, {kModEnvDecay, 75}, {kModEnvDest, 2}},
@@ -507,6 +528,14 @@ int main(int argc, char** argv) {
             const double t = c - j;
             std::printf("%.7gf,%s", tb::kLadderFeedbackComp[j] * (1 - t) + tb::kLadderFeedbackComp[j + 1] * t, i % 8 == 7 ? "\n" : " ");
         }
+        // LP24 on its own knob axis (the source's ladder table): log2 Hz and the
+        // feedback compensation at knob 2 i (i = 64: knob 127's).
+        std::printf("\n// lp24 log2 Hz at knob 2 i\n");
+        for (int i = 0; i <= 64; ++i)
+            std::printf("%.7gf,%s", std::log2(double(tb::kLadderCutoffHz[std::min(2 * i, 127)])), i % 8 == 7 ? "\n" : " ");
+        std::printf("\n// lp24 comp at knob 2 i\n");
+        for (int i = 0; i <= 64; ++i)
+            std::printf("%.7gf,%s", double(tb::kLadderFeedbackComp[std::min(2 * i, 127)]), i % 8 == 7 ? "\n" : " ");
         // LFO pitch depth: cents at full swing for depth u = i / 64.
         std::printf("\n// lfo pitch cents at u = i / 64\n");
         std::vector<double> cents(65);

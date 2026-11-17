@@ -239,6 +239,26 @@ inline float envStep(uint8_t& st, float e, const EnvCoef& c) {
         default: return 0.0f;
     }
 }
+// The filter and mod envelopes: the decay and release aim 1/2048 under
+// their target and stop on it (the source's: they reach it in finite time,
+// smoothly; the mod envelope's FM law reads the tail in dB).
+inline float envStepAim(uint8_t& st, float e, const EnvCoef& c) {
+    switch (st) {
+        case kStDecay: {
+            const float x = c.sus + (e - c.sus + kEnvStop) * c.dec - kEnvStop;
+            return x <= c.sus ? c.sus : x;
+        }
+        case kStRelease: {
+            const float x = (e + kEnvStop) * c.rel - kEnvStop;
+            if (x <= 0.0f) {
+                st = kStIdle;
+                return 0.0f;
+            }
+            return x;
+        }
+        default: return envStep(st, e, c);
+    }
+}
 
 // --- the filter section -------------------------------------------------------------
 //
@@ -255,14 +275,12 @@ inline float envStep(uint8_t& st, float e, const EnvCoef& c) {
 // for a tick beats with a self-oscillation near the tick rate); the cutoff
 // coefficient ramps across the tick.
 //
-// The cutoff is driven on the knob axis of the source's SVF: 16.7 Hz x
-// 2^(k / 12.624) (12.624 units per octave).
+// The cutoff is driven on the source's knob axes: the SVF's 16.7 Hz x
+// 2^(k / 12.624) (12.624 units per octave), the ladder's measured table.
 
 constexpr float kKnobPerOct = 12.624f;
 constexpr float kKnobHz = 16.7f;
-constexpr float kSvfTop = 125.0f;            // the SVF's cutoff stops at knob 125 (15.98 kHz)
-constexpr float kLadderTop = 129.1966f;      // the LP24 target's top (its own knob 125, 20.1 kHz)
-constexpr float kLadderMinHz = 16.054f, kLadderMaxHz = 20172.19f;
+constexpr float kKnobTop = 125.0f;           // the envelope target's top (both axes; SVF: 15.98 kHz, LP24: 20.1 kHz)
 constexpr float kLimAtt = 0.0060844f, kLimRel = 0.0032844f;   // 3.714 ms / 6.89 ms at the device rate
 constexpr float kAgcAtt = 0.0187116f, kAgcRel = 0.000112372f; // 1.2 ms / 0.2017 s
 constexpr float kLimFloor = 0.39f;
@@ -281,18 +299,27 @@ constexpr float kLimitLog2[65] = {
     -1.237943f,     -1.291442f,     -1.344942f,     -1.398442f,     -1.451942f,     -1.505442f,     -1.558942f,     -1.612442f,
     -1.665942f,     -1.719442f,     -1.772942f,     -1.826442f,     -1.879942f,     -1.933442f,     -1.986942f,     -2.040442f,
     -2.093942f};
-// LP24 feedback compensation on the knob axis, k = 2 i.
-constexpr float kLadderComp[66] = {
+// LP24 runs on the source ladder's own knob axis (its measured cutoff table,
+// about 11.8 knob units per octave, compressing above 110): log2 of the
+// stage cutoff and the feedback compensation at knob 2 i (i = 64: knob 127's).
+constexpr float kLadderLog2Hz[65] = {
+    4.004856f, 4.175295f, 4.345735f, 4.516174f, 4.686613f, 4.82554f,  5.002265f, 5.176557f, 5.348955f, 5.563809f, 5.739959f,
+    5.904547f, 6.074631f, 6.240508f, 6.402346f, 6.563309f, 6.72629f,  6.889874f, 7.053081f, 7.225953f, 7.388372f, 7.55057f,
+    7.712356f, 7.874323f, 8.036238f, 8.198272f, 8.36011f,  8.522332f, 8.694881f, 8.857607f, 9.020608f, 9.183769f, 9.347582f,
+    9.511863f, 9.676703f, 9.842143f, 10.00808f, 10.1854f,  10.35324f, 10.52203f, 10.69173f, 10.86273f, 11.035f,   11.20853f,
+    11.38364f, 11.56017f, 11.74945f, 11.92922f, 12.11048f, 12.29292f, 12.47637f, 12.66007f, 12.84324f, 13.02466f, 13.20265f,
+    13.38589f, 13.55026f, 13.70437f, 13.84594f, 13.97315f, 14.08496f, 14.18099f, 14.26146f, 14.30008f, 14.30008f};
+constexpr float kLadderComp[65] = {
     1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f,
-    1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.080977f,
-    1.062369f, 1.052794f, 1.049257f, 1.043637f, 1.038686f, 1.034657f, 1.030689f, 1.026436f, 1.020885f, 1.016055f, 1.01061f,
-    1.003815f, 0.9970397f, 0.9895982f, 0.9809957f, 0.9715737f, 0.9611846f, 0.9499861f, 0.9378017f, 0.9244014f, 0.9098924f,
-    0.8942767f, 0.8774613f, 0.8593651f, 0.8401484f, 0.8198121f, 0.798378f, 0.7758111f, 0.7521923f, 0.7275937f, 0.7020628f,
-    0.6757112f, 0.6486089f, 0.6208066f, 0.592321f, 0.5631359f, 0.533273f, 0.5027391f, 0.4713648f, 0.4389812f, 0.4054153f,
-    0.3705836f, 0.3351587f, 0.3146622f};
+    1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.081027f, 1.061999f,
+    1.052514f, 1.049024f, 1.04311f,  1.038266f, 1.034161f, 1.03016f,  1.025417f, 1.019255f, 1.014816f, 1.008378f, 1.001446f,
+    0.9940841f, 0.9859948f, 0.9765442f, 0.9661619f, 0.9539916f, 0.9414855f, 0.9275236f, 0.9121978f, 0.8954675f, 0.8772041f,
+    0.8573293f, 0.8359052f, 0.8128956f, 0.7866801f, 0.7603873f, 0.7325484f, 0.7032394f, 0.6727081f, 0.6411332f, 0.6086937f,
+    0.5756683f, 0.5424138f, 0.5072785f, 0.4748396f, 0.4434731f, 0.4136966f, 0.3860546f, 0.3611333f, 0.3395972f, 0.3222306f,
+    0.3146622f, 0.3146622f};
 
-inline float limitGain(float e) {
-    if (e <= kLimFloor) return 1.0f;
+// (out of line: per tick, and per frame only above the AGC's threshold)
+__attribute__((noinline)) inline float limitGainSlow(float e) {
     const float x = (fastLog2(e) + 1.5f) * 16.0f;
     float lg;
     if (x >= 64.0f) {
@@ -303,7 +330,9 @@ inline float limitGain(float e) {
     }
     return fastExp2(lg);
 }
-inline float agcGain(float e) { return e > kAgcT ? fastExp2(kAgcExp * (kAgcLog2T - fastLog2(e))) : 1.0f; }
+inline float limitGain(float e) { return e <= kLimFloor ? 1.0f : limitGainSlow(e); }
+__attribute__((noinline)) inline float agcGainSlow(float e) { return fastExp2(kAgcExp * (kAgcLog2T - fastLog2(e))); }
+inline float agcGain(float e) { return e > kAgcT ? agcGainSlow(e) : 1.0f; }
 inline float satA(float s) { return s <= 0.0f ? 0.0f : kSatMax * (fastExp2(10.0f * clampf(s, 0.0f, 1.0f)) - 1.0f) * (1.0f / 1023.0f); }
 inline float knobOfHz(float hz) { return kKnobPerOct * fastLog2((hz < 1.0f ? 1.0f : hz) * (1.0f / kKnobHz)); }
 inline float hzOfKnob(float k) { return kKnobHz * fastExp2(k * (1.0f / kKnobPerOct)); }
@@ -313,20 +342,42 @@ inline float sinPoly(float x) {
     return x * (1.0f + x2 * (-1.0f / 6.0f + x2 * (1.0f / 120.0f + x2 * (-1.0f / 5040.0f + x2 * (1.0f / 362880.0f)))));
 }
 // SVF f for knob k (clamped to 0 .. 125).
-inline float svfF(float k) { return 2.0f * sinPoly(va::kPi * hzOfKnob(clampf(k, 0.0f, kSvfTop)) * (0.5f * kInvFs)); }
-// LP24 stage coefficient a = g / (1 + g), g = tan(pi f / fs), and the feedback k, for knob k.
+inline float svfF(float k) { return 2.0f * sinPoly(va::kPi * hzOfKnob(clampf(k, 0.0f, kKnobTop)) * (0.5f * kInvFs)); }
+// LP24: the stage cutoff of ladder knob k (0..127), the knob of a cutoff.
+inline float ladderHz(float k) {
+    const float x = clampf(k, 0.0f, 127.0f) * 0.5f;
+    const int i = x < 63.0f ? int(x) : 63;
+    return fastExp2(kLadderLog2Hz[i] + (kLadderLog2Hz[i + 1] - kLadderLog2Hz[i]) * (x - float(i)));
+}
+inline float ladderKnobOfHz(float hz) {
+    const float l = fastLog2(hz < 1.0f ? 1.0f : hz);
+    if (l <= kLadderLog2Hz[0]) return 0.0f;
+    int lo = 0, hi = 63;   // kLadderLog2Hz[lo] < l <= kLadderLog2Hz[hi]
+    if (l >= kLadderLog2Hz[63]) return 126.0f;
+    while (hi - lo > 1) {
+        const int m = (lo + hi) >> 1;
+        if (kLadderLog2Hz[m] < l) lo = m;
+        else hi = m;
+    }
+    return 2.0f * (float(lo) + (l - kLadderLog2Hz[lo]) / (kLadderLog2Hz[hi] - kLadderLog2Hz[lo]));
+}
+// LP24 stage coefficient a = g / (1 + g), g = tan(pi f / fs), and the feedback k, for ladder knob k.
 inline float ladderA(float k) {
-    const float hz = clampf(hzOfKnob(k), kLadderMinHz, kLadderMaxHz);
+    const float hz = ladderHz(k);
     const float g = va::tanPade(va::kPi * (hz < 0.49f * kFs ? hz : 0.49f * kFs) * kInvFs);
     return g / (1.0f + g);
 }
 inline float ladderK(float k, float res) {
-    const float x = clampf(k * 0.5f, 0.0f, 65.0f);
-    const int i = x < 65.0f ? int(x) : 64;
+    const float x = clampf(k, 0.0f, 127.0f) * 0.5f;
+    const int i = x < 63.0f ? int(x) : 63;
     const float comp = kLadderComp[i] + (kLadderComp[i + 1] - kLadderComp[i]) * (x - float(i));
     const float r = 3.7719f * res - 0.076f;
     return (r > 0.0f ? r : 0.0f) * comp;
 }
+
+// SVF damping 1 - r, with a small floor (undamped, its state would grow
+// without bound under a tone at the cutoff).
+inline float svfDamp(float r) { return 1.0f - r > 0.004f ? 1.0f - r : 0.004f; }
 
 struct Filter {
     float s[6];   // SVF: low, band; LP24: four stages, the delayed output, the AGC follower
@@ -402,13 +453,13 @@ struct Section {
     void init(int t, float hz, float res, float sat) {
         std::memset(&f, 0, sizeof(f));
         type = t;
-        const float knob = knobOfHz(hz);
         const float r = clampf(res, 0.0f, 1.0f);
         if (kindOf(t) == kKindSvf) {
-            c = svfF(knob);
-            d = 1.0f - r;
+            c = svfF(knobOfHz(hz));
+            d = svfDamp(r);
             g = 1.0f - 0.7f * r;
         } else {
+            const float knob = ladderKnobOfHz(hz);
             c = ladderA(knob);
             k = ladderK(knob, r);
         }
