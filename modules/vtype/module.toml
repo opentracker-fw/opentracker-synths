@@ -1,4 +1,4 @@
-# OpenTracker module manifest (core: docs/PLAN_3X.md §7.2, tools/profile.py).
+# OpenTracker module manifest (read by the core's tools/profile.py).
 id      = "VTY1"
 name    = "V-Type synth"
 version = "1.0.0"
