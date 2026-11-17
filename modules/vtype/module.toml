@@ -1,0 +1,20 @@
+# OpenTracker module manifest (core: docs/PLAN_3X.md §7.2, tools/profile.py).
+id      = "VTY1"
+name    = "V-Type synth"
+version = "1.0.0"
+api     = 1
+entry   = "vtypeModule"
+caps    = ["synthEngine"]
+sources = ["vtype.cpp", "vtype_desc.cpp", "vtype_module.cpp"]
+tests   = ["engine_vtype_test.cpp"]
+
+flash_max_bytes   = 24000
+sram_audio_bytes  = 0                 # no static buffers
+sdram_bytes       = 0
+fastrun_bytes     = 0
+cpu_insn_per_unit = 40000             # bench-m4 limit per voice (vtype.unit)
+max_units         = 6
+bench             = "vtype"
+engines           = [139]             # 0x8B: a module engine (not a Tracker Mini model)
+bench_sources     = ["vtype_bench.cpp"]
+bench_entry       = "vtypeBench"
