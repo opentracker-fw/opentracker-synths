@@ -290,14 +290,14 @@ inline std::complex<double> svfH(int out, double fc, double k, double f) {
     return out == 0 ? 1.0 / d : (out == 1 ? s / d : s * s / d);
 }
 // A filter type's response (vtype FType): LP12, LP24 (a stage at k = 1.848
-// before the resonant one), BP12, HP12.
+// before the resonant one), BP12, HP12, with the input gain of resoGain.
 inline std::complex<double> typeH(int type, double fc, double reso, double f) {
-    const double k = double(vt::resoK(float(reso)));
+    const double k = double(vt::resoK(float(reso))), g = double(vt::resoGain(float(k)));
     switch (type) {
-        case vt::kLp12: return svfH(0, fc, k, f);
-        case vt::kLp24: return svfH(0, fc, double(vt::kStage1K), f) * svfH(0, fc, k, f);
-        case vt::kBp12: return svfH(1, fc, k, f);
-        default: return svfH(2, fc, k, f);
+        case vt::kLp12: return g * svfH(0, fc, k, f);
+        case vt::kLp24: return g * svfH(0, fc, double(vt::kStage1K), f) * svfH(0, fc, k, f);
+        case vt::kBp12: return g * svfH(1, fc, k, f);
+        default: return g * svfH(2, fc, k, f);
     }
 }
 // Swarm levels (centre, each side saw) at Count index c and Mix m.
@@ -320,10 +320,9 @@ inline double softCurve(double x) {
     x = std::clamp(x, -3.0, 3.0);
     return x * (27.0 + x * x) / (27.0 + 9.0 * x * x);
 }
-inline double foldCurve(double x) {
-    double t = (x + 1.0) * 0.25;
-    t -= std::floor(t);
-    return 1.0 - 4.0 * std::fabs(t - 0.5);
+inline double foldCurve(double x) {   // one fold back at +-1, held past +-3
+    const double h = std::clamp(x, -1.0, 1.0);
+    return std::clamp(h + h - x, -1.0, 1.0);
 }
 inline double curveOf(int c, double x) {
     return c == vt::kSoft ? softCurve(x) : (c == vt::kHard ? std::clamp(x, -1.0, 1.0) : foldCurve(x));

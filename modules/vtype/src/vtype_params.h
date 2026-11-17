@@ -79,6 +79,7 @@ constexpr float kNoiseLevel = 0.35f;
 // the white signal minus the low pass).
 constexpr float kColourHi = 8000.0f;
 constexpr float kColourLo = 300.0f;
+constexpr float kColourWet = 10.0f;   // the colour fully in from |Colour| 0.1
 constexpr float kEnvOct = 8.0f;      // Env Amt 1 = 8 octaves at full Env 1
 constexpr float kModOct = 8.0f;      // matrix Cutoff: 8 octaves
 constexpr float kModSemi = 24.0f;    // matrix Pitch: 24 st x Amt |Amt|
@@ -86,9 +87,13 @@ constexpr float kModPw = 0.45f;
 constexpr float kStage1K = 1.848f;   // LP24's first stage (2 x damping)
 // Resonance r -> k (2 x damping): Q 0.5 .. 50, no self-oscillation.
 constexpr float resoK(float r) { return 2.0f * (1.0f - r) * (1.0f - r) + 0.02f; }
+// The filter input's gain at k: 1 down to k = 1 (Resonance 0.29), then k,
+// so the resonant peak (1 / k) stays within 6 dB of the open filter's.
+constexpr float resoGain(float k) { return k < 1.0f ? k : 1.0f; }
 // Drive d: 2^(4 d) into the curve, 2^(-2.4 d) after it.
 constexpr float kDriveIn = 4.0f;
 constexpr float kDriveOut = -2.4f;
+constexpr float kDriveWet = 20.0f;   // the curve fully in from Drive 0.05
 
 // LFO tempo divisions (Sync 1..15): quarter notes per cycle.
 constexpr float kSyncBeats[16] = {0.0f,  32.0f, 16.0f, 8.0f, 4.0f, 3.0f, 2.0f, 1.5f,

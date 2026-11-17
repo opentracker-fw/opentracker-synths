@@ -373,6 +373,34 @@ TEST(vtype_reused_sounding_voice_does_not_click) {
     const double after = maxStep(r.L.size() - 20 * kBlock, r.L.size());
     if (!(jump < 2.0 * std::max(before, after) + 1e-4)) std::printf("       step %.4f (steady %.4f / %.4f)\n", jump, before, after);
     CHECK(jump < 2.0 * std::max(before, after) + 1e-4);
+    // Osc 2 (pulse, triangle) on, retriggered deep in the tail (level ~6e-4): no spike.
+    for (int w : {int(vt::kO2Pulse), int(vt::kO2Tri)}) {
+        float worst = 0.0f, normal = 0.0f;
+        for (int trial = 0; trial < 60; ++trial) {
+            Vals c = initValues();
+            c[vt::kBalance] = 0.0f;
+            c[vt::kO2Wave] = float(w);
+            c[vt::kAmpR] = 0.5f;
+            Rig q(c);
+            for (int j = 0; j < trial % 13; ++j) {
+                q.on(0, float(40 + j), true, false);
+                q.run(3 + trial % 5);
+            }
+            q.on(0, 36.0f, true, false);
+            q.run(25);
+            normal = std::max(normal, peak(q.L));
+            q.off(0);
+            int k = 0;
+            while (q.v[0].level > 6e-4f && k < 3000 && q.run(1)) ++k;
+            if (q.v[0].level < 1e-4f) continue;
+            const size_t mark = q.L.size();
+            q.on(0, 36.0f, true, false);
+            q.run(40);
+            worst = std::max(worst, peak(q.L, mark));
+        }
+        if (!(worst <= 1.2f * normal)) std::printf("       wave %d: tail retrigger peak %.3f (normal %.3f)\n", w, worst, normal);
+        CHECK(worst <= 1.2f * normal);
+    }
 }
 
 TEST(vtype_voice_level_and_volume) {
@@ -507,7 +535,7 @@ TEST(vtype_routings) {
                     case vt::kSingle: want = h1; break;
                     case vt::kSerial: want = h1 * h2; break;
                     case vt::kParallel: want = eq * h1 + eq * h2; break;
-                    default: want = 0.5 * eq * h2; break;   // Split: osc 2 is on filter 2's side only, Width 0
+                    default: want = eq * h2; break;   // Split: osc 2 is on filter 2's side only, Width 0 (the mono sum)
                 }
                 const double got = level(held(v, float(pitchOf(hz)), 0.5), hz) / openGain(hz);
                 const double d = db(got / std::abs(want));
@@ -704,6 +732,16 @@ TEST(vtype_sync_and_ring) {
     double first = 0.0, last = 0.0;
     for (float semi : {5.0f, 10.0f, 17.0f}) {
         Vals v = probe(vt::kO2Saw);
+        for (int w : {int(vt::kO2Pulse), int(vt::kO2Tri), int(vt::kO2Sine)}) {   // every wave follows the centre
+            Vals q = probe(w);
+            q[vt::kO2Semi] = semi;
+            const double fr = level(held(q, key, 1.0), f0);
+            q[vt::kO2Sync] = 1.0f;
+            const double sy = level(held(q, key, 1.0), f0);
+            if (!(sy > 0.03 * outGain() && fr < 0.01 * outGain())) std::printf("       sync wave %d semi %.0f: line %.4f (free %.4f)\n", w, semi, sy, fr);
+            CHECK(sy > 0.03 * outGain());
+            CHECK(fr < 0.01 * outGain());
+        }
         v[vt::kO2Semi] = semi;
         const double free = level(held(v, key, 1.0), f0);
         v[vt::kO2Sync] = 1.0f;
@@ -781,9 +819,9 @@ TEST(vtype_balance_noise_and_colour) {
         v[vt::kO2Semi] = -36.0f;
         Rig r(v);
         r.on(0, 0.0f);
-        r.seconds(2.1);
-        const Buf x = slice(r.L, 0.1, 2.1);
-        const double lo = bandPower(x, 150.0, 400.0), hi = bandPower(x, 6000.0, 9000.0);
+        r.seconds(4.1);
+        const Buf x = slice(r.L, 0.1, 4.1);
+        const double lo = bandPower(x, 150.0, 400.0, 600), hi = bandPower(x, 6000.0, 9000.0, 600);
         const double fc = c < 0.0 ? double(vt::kColourHi) * std::pow(double(vt::kColourLo / vt::kColourHi), -c)
                                   : double(vt::kColourLo) * std::pow(double(vt::kColourHi / vt::kColourLo), c);
         const double a = 1.0 - std::exp(-2.0 * kPi * fc / kFs);
@@ -823,15 +861,15 @@ TEST(vtype_split_and_width) {
     const Buf l = slice(r.L, 0.1, 1.1), rr = slice(r.R, 0.1, 1.1);
     CHECK(db(level(l, f2) / level(rr, f2)) < -60.0);
     CHECK(db(level(rr, f1) / level(l, f1)) < -60.0);
-    // Width w: filter 1 at pan -w, filter 2 at +w (linear): L / R = (1 + w) / (1 - w).
+    // Width w: filter 1 full on the left and 1 - w on the right, filter 2 the other way round.
     for (double w : {0.25, 0.5, 0.75}) {
         v[vt::kSplitWidth] = float(w);
         Rig s(v);
         s.on(0, key);
         s.seconds(1.1);
         const Buf a = slice(s.L, 0.1, 1.1), b = slice(s.R, 0.1, 1.1);
-        CHECK(std::fabs(db(level(a, f1) / level(b, f1)) - db((1.0 + w) / (1.0 - w))) < 0.3);
-        CHECK(std::fabs(db(level(b, f2) / level(a, f2)) - db((1.0 + w) / (1.0 - w))) < 0.3);
+        CHECK(std::fabs(db(level(a, f1) / level(b, f1)) - db(1.0 / (1.0 - w))) < 0.3);
+        CHECK(std::fabs(db(level(b, f2) / level(a, f2)) - db(1.0 / (1.0 - w))) < 0.3);
     }
     // Width 0 is the mono sum, bit for bit; every other routing is mono.
     v[vt::kSplitWidth] = 0.0f;
@@ -840,6 +878,23 @@ TEST(vtype_split_and_width) {
     m.seconds(0.5);
     CHECK(m.L == m.R);
     CHECK(rms(m.L) > 0.01);
+    // ... at Parallel's level: the Swarm alone through filter 1 sounds the same in both.
+    {
+        Vals a = initValues();
+        a[vt::kFltBalance] = -1.0f;
+        a[vt::kRouting] = float(vt::kSplit);
+        a[vt::kSplitWidth] = 0.0f;
+        a[vt::kPhase] = float(vt::kPhaseReset);
+        Vals b = a;
+        b[vt::kRouting] = float(vt::kParallel);
+        Rig ra(a), rb(b);
+        ra.on(0, key);
+        rb.on(0, key);
+        ra.seconds(0.4);
+        rb.seconds(0.4);
+        CHECK(rms(ra.L) > 0.01);
+        CHECK(rmsDiff(ra.L, rb.L) < 1e-6 * rms(rb.L));
+    }
     for (int route : {int(vt::kSingle), int(vt::kSerial), int(vt::kParallel)}) {
         Vals u = v;
         u[vt::kRouting] = float(route);
@@ -1213,7 +1268,7 @@ TEST(vtype_moved_parameters_ramp_without_a_click) {
         c[vt::kRouting] = float(j.param == vt::kSplitWidth ? vt::kSplit : vt::kSerial);
         c[vt::kFltBalance] = 0.0f;
         c[vt::kBalance] = 0.0f;
-        c[vt::kO2Wave] = float(vt::kO2Saw);
+        c[vt::kO2Wave] = float(j.param == vt::kO2Pw ? vt::kO2Pulse : vt::kO2Saw);
         c[vt::kF2Type] = float(vt::kLp12);
         c[vt::kF2Cutoff] = 3000.0f;
         c[vt::kAmpD] = 10.0f;
@@ -1235,7 +1290,7 @@ TEST(vtype_moved_parameters_ramp_without_a_click) {
             const double jump = maxStep(at - 1, at + 2 * kBlock);
             r.seconds(0.25);
             const double after = maxStep(r.L.size() - 20 * kBlock, r.L.size());
-            const double lim = 2.0 * std::max(before, after) + 3e-3;   // -50 dB
+            const double lim = 1.5 * std::max(before, after) + 1e-3;
             if (!(jump < lim)) std::printf("       param %d -> %.2f: step %.4f (steady %.4f / %.4f)\n", j.param, v, jump, before, after);
             CHECK(jump < lim);
             CHECK(std::fabs(r.p.end[j.param] - v) < 1e-6f);
@@ -1413,6 +1468,173 @@ TEST(vtype_every_parameter_has_an_effect) {
     }
 }
 
+
+// --- edges, continuity, defaults ---------------------------------------------------
+
+namespace {
+Vals o2alone(int wave) {
+    Vals c = plain();
+    c[vt::kBalance] = 1.0f;
+    c[vt::kO2Wave] = float(wave);
+    return c;
+}
+}  // namespace
+
+TEST(vtype_osc2_edges_stay_bounded_under_fast_width) {
+    for (int w : {int(vt::kO2Pulse), int(vt::kO2Tri)}) {
+        // The loudest steady width (a narrow pulse less its mean peaks near 1.9).
+        float ref = 0.0f;
+        for (float pw : {0.05f, 0.1f, 0.5f, 0.9f, 0.95f}) {
+            Vals s = o2alone(w);
+            s[vt::kO2Pw] = pw;
+            ref = std::max(ref, peak(play(s, 36.0f, 1.0)));
+        }
+        // A square LFO slamming the width.
+        Vals c = o2alone(w);
+        c[vt::kL1Wave] = float(vt::kSquare);
+        c[vt::kL1Rate] = 8.0f;
+        c[size_t(vt::modSrc(0))] = float(vt::kSrcLfo1);
+        c[size_t(vt::modDest(0))] = float(vt::kDstPw);
+        c[size_t(vt::modAmt(0))] = 1.0f;
+        for (float key : {24.0f, 36.0f, 60.0f}) {
+            const float pk = peak(play(c, key, 3.0));
+            if (!(pk <= 1.3f * ref)) std::printf("       wave %d key %.0f: LFO on PW peak %.3f (steady %.3f)\n", w, key, pk, ref);
+            CHECK(pk <= 1.3f * ref);
+        }
+        // The width moved by hand between 0.9 and 0.1.
+        Vals q = o2alone(w);
+        q[vt::kO2Pw] = 0.9f;
+        Rig r(q);
+        r.on(0, 36.0f);
+        for (int k = 0; k < 200; ++k) {
+            r.run(3 + k % 5);
+            q[vt::kO2Pw] = (k & 1) ? 0.9f : 0.1f;
+            r.move(q);
+        }
+        if (!(peak(r.L) <= 1.3f * ref)) std::printf("       wave %d: PW slams peak %.3f (steady %.3f)\n", w, peak(r.L), ref);
+        CHECK(peak(r.L) <= 1.3f * ref);
+    }
+}
+
+TEST(vtype_random_moves_while_sounding) {
+    uint32_t seed = 4242;
+    auto rnd = [&seed]() {
+        seed = seed * 1664525u + 1013904223u;
+        return float(seed >> 8) * (1.0f / 16777216.0f);
+    };
+    int bad = 0;
+    long sub = 0;
+    float worst = 0.0f;
+    for (int run = 0; run < 150; ++run) {
+        Vals a = initValues();
+        Rig r(a);
+        r.on(0, float(int(rnd() * 127.0f)));
+        for (int b = 0; b < 200; ++b) {
+            for (int i = 0; i < kN; ++i)
+                if (i != vt::kVolume && rnd() < 0.3f) a[size_t(i)] = range(i)->min + rnd() * (range(i)->max - range(i)->min);
+            r.move(a);
+            if (rnd() < 0.03f) r.on(0, float(int(rnd() * 127.0f)), true, rnd() < 0.5f);
+            if (rnd() < 0.01f) r.off(0);
+        }
+        const float pk = std::max(peak(r.L), peak(r.R));
+        if (!finite(r.L) || !finite(r.R) || pk > 4.0f) ++bad;
+        if (finite(r.L)) worst = std::max(worst, pk);
+        sub += subnormals(r.L) + subnormals(r.R);
+    }
+    std::printf("  random moves while sounding: worst peak %.2f, %d runs over 4 or not finite\n", worst, bad);
+    CHECK_EQ(bad, 0);
+    CHECK_EQ(sub, 0L);
+}
+
+TEST(vtype_drive_tends_to_no_drive_at_zero) {
+    for (int c = 0; c < 3; ++c) {
+        Vals a = plain();
+        a[vt::kCount] = 2.0f;
+        a[vt::kCurve] = float(c);
+        Vals b = a;
+        b[vt::kDrive] = 1e-4f;
+        const Buf x = held(a, 48.0f, 0.5), y = held(b, 48.0f, 0.5);
+        const double d = rmsDiff(x, y) / rms(x);
+        if (!(d < 1e-2)) std::printf("       curve %d: Drive 0 against 0.0001 differs by %.4f\n", c, d);
+        CHECK(d < 1e-2);
+    }
+}
+
+TEST(vtype_init_plays_every_routing) {
+    mod::ModuleHost::instance().init();
+    CHECK_EQ(range(vt::kFltBalance)->def, 0.0f);
+    const double single = rms(held(initValues(), 60.0f, 0.4));
+    for (int route : {int(vt::kSerial), int(vt::kParallel), int(vt::kSplit)}) {
+        Vals v = initValues();
+        v[vt::kRouting] = float(route);
+        const double r = rms(held(v, 60.0f, 0.4));
+        if (!(r > 0.1 * single)) std::printf("       Init routing %d: rms %.4f (Single %.4f)\n", route, r, single);
+        CHECK(r > 0.1 * single);
+    }
+}
+
+TEST(vtype_resonance_keeps_the_level_in_bounds) {
+    for (int t : {int(vt::kLp12), int(vt::kLp24), int(vt::kBp12)}) {
+        Vals v = plain();
+        v[vt::kF1Type] = float(t);
+        v[vt::kF1Cutoff] = 261.63f;   // on the fundamental of key 60
+        v[vt::kF1Key] = 1.0f;
+        const float p0 = peak(held(v, 60.0f, 0.8));
+        v[vt::kF1Reso] = 1.0f;
+        const float p1 = peak(held(v, 60.0f, 0.8));
+        if (!(p1 <= 2.0f * p0)) std::printf("       type %d: Reso 1 peak %.3f, Reso 0 %.3f\n", t, p1, p0);
+        CHECK(p1 <= 2.0f * p0);
+    }
+}
+
+TEST(vtype_parallel_filters_keep_running) {
+    // Filter 2 at weight 0 still runs: brought in later, it plays as if it always had.
+    Vals a = initValues();
+    a[vt::kPhase] = float(vt::kPhaseReset);
+    a[vt::kRouting] = float(vt::kParallel);
+    a[vt::kF2Type] = float(vt::kLp12);
+    a[vt::kF2Cutoff] = 800.0f;
+    a[vt::kF2Reso] = 0.6f;
+    Vals b = a;
+    a[vt::kFltBalance] = -1.0f;
+    Rig ra(a), rb(b);
+    ra.on(0, 48.0f);
+    rb.on(0, 48.0f);
+    ra.seconds(0.3);
+    rb.seconds(0.3);
+    ra.move(b);
+    rb.move(b);
+    const size_t at = ra.L.size();
+    ra.seconds(0.3);
+    rb.seconds(0.3);
+    CHECK(rmsDiff(Buf(ra.L.begin() + long(at), ra.L.end()), Buf(rb.L.begin() + long(at), rb.L.end())) < 1e-5);
+}
+
+TEST(vtype_sample_and_hold_starts_with_a_value) {
+    Vals v = probe();
+    v[vt::kL1Wave] = float(vt::kSampleHold);
+    v[vt::kL1Rate] = 0.05f;   // no wrap for 20 s
+    v[size_t(vt::modSrc(0))] = float(vt::kSrcLfo1);
+    v[size_t(vt::modDest(0))] = float(vt::kDstVolume);
+    v[size_t(vt::modAmt(0))] = 0.5f;
+    const double with = rms(held(v, 69.0f, 0.3)), without = rms(held(probe(), 69.0f, 0.3));
+    CHECK(std::fabs(with / without - 1.0) > 0.01);
+}
+
+TEST(vtype_colour_is_continuous_through_zero) {
+    Vals a = probe();
+    a[vt::kO2Semi] = -36.0f;
+    a[vt::kNoise] = 1.0f;
+    for (float c : {-0.001f, 0.001f}) {
+        Vals b = a;
+        b[vt::kColour] = c;
+        const Buf x = play(a, 0.0f, 0.3), y = play(b, 0.0f, 0.3);
+        const double d = rmsDiff(x, y) / rms(x);
+        if (!(d < 0.02)) std::printf("       colour %.3f against 0: %.4f\n", c, d);
+        CHECK(d < 0.02);
+    }
+}
+
 // Golden hashes (host build, -ffp-contract=off): a rich phrase on the engine
 // alone and an Init line through a SynthBank slot. Any change of the sound
 // shows here; update the values only for an intended change.
@@ -1447,6 +1669,6 @@ TEST(vtype_golden_hashes) {
     const Buf left = sequence(richContext(), &right);
     const uint64_t e = hashOf(left) ^ (hashOf(right) * 3), b = bankHash();
     std::printf("  V-Type golden: engine %016llx, bank %016llx\n", (unsigned long long)e, (unsigned long long)b);
-    CHECK_EQ(e, uint64_t(0x442a9424a491242aull));
-    CHECK_EQ(b, uint64_t(0xb43cfca933a7aae6ull));
+    CHECK_EQ(e, uint64_t(0x29149408552890aaull));
+    CHECK_EQ(b, uint64_t(0x2cde9c74b57fc2a7ull));
 }

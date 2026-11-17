@@ -47,7 +47,7 @@ const PatchParamRange kParams[kParamCount] = {
     {0, -1, 1},           // F2 Env Amt
     {0, 0, 1},            // F2 Key Track
     {0, 0, 3},            // Routing: Single
-    {1, -1, 1},           // Flt Balance
+    {0, -1, 1},           // Flt Balance
     {0, 0, 1},            // Drive
     {0, 0, 2},            // Curve: Soft / Hard / Fold
     {0.7f, 0, 1},         // Split Width

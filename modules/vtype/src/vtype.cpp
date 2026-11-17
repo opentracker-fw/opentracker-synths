@@ -52,7 +52,16 @@ constexpr float kMaxDtC = 0.42f;      // centre increment ceiling: the widest sa
 constexpr float kDoneLevel = 1.0e-4f; // -80 dB: the voice is finished
 constexpr float kOutTrim = 0.32f;     // voice output level (Init near ACD's Init at the slot gain)
 
-inline float sqrtf_(float x) { return __builtin_sqrtf(x > 0.0f ? x : 0.0f); }
+inline float sqrtf_(float x) {
+    x = x > 0.0f ? x : 0.0f;
+#if defined(__arm__) && defined(__ARM_FP)
+    float r;
+    __asm__("vsqrt.f32 %0, %1" : "=t"(r) : "t"(x));   // no libm call (errno)
+    return r;
+#else
+    return __builtin_sqrtf(x);
+#endif
+}
 inline float absf(float x) { return __builtin_fabsf(x); }
 
 // ---------------------------------------------------------------------------
@@ -272,15 +281,63 @@ struct OscRamp {
     float dt, ddt, w, dw, g, dg;
 };
 
+// The pulse and the triangle as va::vcoFrame does them (one frame late, the
+// polyBLEP / polyBLAMP residuals), with the edge's place clamped into the
+// frame: a width that moves faster than the phase, or a phase set by a note,
+// can put the edge outside it, and an unclamped residual is a spike.
+inline float pulseFrame(float& p, float& z, bool& hi, float d, float duty) {
+    p += d;
+    const bool wrap = p >= 1.0f;
+    if (wrap) p -= 1.0f;
+    float out = z;
+    const bool h = p < duty;
+    float cur = (h ? 1.0f : -1.0f) - (duty + duty - 1.0f);
+    if (wrap) {
+        const float x = clampf(p / d, 0.0f, 1.0f), y = 1.0f - x;
+        cur -= y * y;
+        out += x * x;
+    }
+    if (!h && (hi || wrap)) {
+        const float x = clampf((p - duty) / d, 0.0f, 1.0f), y = 1.0f - x;
+        cur += y * y;
+        out -= x * x;
+    }
+    hi = h;
+    z = cur;
+    return out;
+}
+inline float triFrame(float& p, float& z, bool& hi, float d) {
+    p += d;
+    const bool wrap = p >= 1.0f;
+    if (wrap) p -= 1.0f;
+    float out = z, cur = 4.0f * absf(p - 0.5f) - 1.0f;
+    const float k = (8.0f / 6.0f) * d;
+    if (wrap) {
+        const float x = clampf(p / d, 0.0f, 1.0f), y = 1.0f - x;
+        cur -= k * y * y * y;
+        out -= k * x * x * x;
+    }
+    const bool h = p < 0.5f;
+    if (!h && hi) {
+        const float x = clampf((p - 0.5f) / d, 0.0f, 1.0f), y = 1.0f - x;
+        cur += k * y * y * y;
+        out += k * x * x * x;
+    }
+    hi = h;
+    z = cur;
+    return out;
+}
+
 template <int kW>
 void osc2Pass(float* out, VoiceState& V, OscRamp o) {
     float p = V.p2, z = V.z2;
-    bool hi = V.flags & kHi2;
+    // The hi / lo state follows the phase it starts from (a note may have set it).
+    bool hi = (V.flags & kHi2) && p < (kW == kO2Pulse ? o.w : 0.5f);
     for (uint32_t i = 0; i < kBlock; ++i) {
         float y;
         if (kW == kO2Saw) y = va::vcoFrame<va::kShSaw>(p, z, hi, o.dt, o.w);
-        else if (kW == kO2Pulse) y = va::vcoFrame<va::kShPulse>(p, z, hi, o.dt, o.w);
-        else if (kW == kO2Tri) y = va::vcoFrame<va::kShTri>(p, z, hi, o.dt, o.w);
+        else if (kW == kO2Pulse) y = pulseFrame(p, z, hi, o.dt, o.w);
+        else if (kW == kO2Tri) y = triFrame(p, z, hi, o.dt);
         else {
             p += o.dt;
             if (p >= 1.0f) p -= 1.0f;
@@ -357,8 +414,10 @@ void ringPass(float* b, Centre c, float r, float dr) {
     }
 }
 
-// Noise: white (0.35 N), Colour < 0 its one-pole low pass, > 0 white minus it.
-void noisePass(float* b, VoiceState& V, int mode, float n, float dn, float a, float da) {
+// Noise: white (0.35 N); Colour < 0 its one-pole low pass, > 0 white minus
+// it (mode -1 / +1, one coefficient a for the block), blended in by wet so
+// Colour passes 0 without a step.
+void noisePass(float* b, VoiceState& V, int mode, float n, float dn, float a, float wet, float dwet) {
     uint32_t s = V.rng;
     float lp = V.nz;
     for (uint32_t i = 0; i < kBlock; ++i) {
@@ -366,8 +425,8 @@ void noisePass(float* b, VoiceState& V, int mode, float n, float dn, float a, fl
         float y = w;
         if (mode != 0) {
             lp += a * (w - lp);
-            y = mode < 0 ? lp : w - lp;
-            a += da;
+            y = w + wet * ((mode < 0 ? lp : w - lp) - w);
+            wet += dwet;
         }
         b[i] += n * y;
         n += dn;
@@ -390,19 +449,28 @@ inline SvfRamp svfRamp(float g0, float k0, float g1, float k1) {
     return SvfRamp{a10, (a11 - a10) * kInvBlock, a20, (a21 - a20) * kInvBlock, a30, (a31 - a30) * kInvBlock};
 }
 
+// The coefficients (and the input gain, the high-pass mix) step per segment
+// of 16 frames, at the segment's middle value.
+constexpr uint32_t kSeg = 16;
+
 // LP24's first stage (low-pass), in place.
-void svfLowPass(float* x, float* s, SvfRamp c) {
+void svfLowPass(float* x, float* s, SvfRamp c, float gin, float dgin) {
     float s1 = s[0], s2 = s[1];
-    for (uint32_t i = 0; i < kBlock; ++i) {
-        const float v3 = x[i] - s2;
-        const float v1 = c.a1 * s1 + c.a2 * v3;
-        const float v2 = s2 + c.a2 * s1 + c.a3 * v3;
-        s1 = v1 + v1 - s1;
-        s2 = v2 + v2 - s2;
-        x[i] = v2;
-        c.a1 += c.d1;
-        c.a2 += c.d2;
-        c.a3 += c.d3;
+    constexpr float h = 0.5f * float(kSeg);
+    for (uint32_t b = 0; b < kBlock; b += kSeg) {
+        const float a1 = c.a1 + h * c.d1, a2 = c.a2 + h * c.d2, a3 = c.a3 + h * c.d3, g = gin + h * dgin;
+        for (uint32_t i = b; i < b + kSeg; ++i) {
+            const float v3 = g * x[i] - s2;
+            const float v1 = a1 * s1 + a2 * v3;
+            const float v2 = s2 + a2 * s1 + a3 * v3;
+            s1 = v1 + v1 - s1;
+            s2 = v2 + v2 - s2;
+            x[i] = v2;
+        }
+        c.a1 += float(kSeg) * c.d1;
+        c.a2 += float(kSeg) * c.d2;
+        c.a3 += float(kSeg) * c.d3;
+        gin += float(kSeg) * dgin;
     }
     s[0] = va::flush(s1);
     s[1] = va::flush(s2);
@@ -410,26 +478,39 @@ void svfLowPass(float* x, float* s, SvfRamp c) {
 
 // The resonant stage, any type: y = m0 x + m1 band + m2 low (high-pass:
 // x - k band - low, m1 = -k ramping), in place.
-void svfStage(float* x, float* s, SvfRamp c, float m0, float m1, float dm1, float m2) {
+void svfStage(float* x, float* s, SvfRamp c, float m0, float m1, float dm1, float m2, float gin, float dgin) {
     float s1 = s[0], s2 = s[1];
-    for (uint32_t i = 0; i < kBlock; ++i) {
-        const float in = x[i], v3 = in - s2;
-        const float v1 = c.a1 * s1 + c.a2 * v3;
-        const float v2 = s2 + c.a2 * s1 + c.a3 * v3;
-        s1 = v1 + v1 - s1;
-        s2 = v2 + v2 - s2;
-        x[i] = m0 * in + m1 * v1 + m2 * v2;
-        m1 += dm1;
-        c.a1 += c.d1;
-        c.a2 += c.d2;
-        c.a3 += c.d3;
+    constexpr float h = 0.5f * float(kSeg);
+    for (uint32_t b = 0; b < kBlock; b += kSeg) {
+        const float a1 = c.a1 + h * c.d1, a2 = c.a2 + h * c.d2, a3 = c.a3 + h * c.d3, g = gin + h * dgin, n1 = m1 + h * dm1;
+        for (uint32_t i = b; i < b + kSeg; ++i) {
+            const float in = g * x[i], v3 = in - s2;
+            const float v1 = a1 * s1 + a2 * v3;
+            const float v2 = s2 + a2 * s1 + a3 * v3;
+            s1 = v1 + v1 - s1;
+            s2 = v2 + v2 - s2;
+            x[i] = m0 * in + n1 * v1 + m2 * v2;
+        }
+        c.a1 += float(kSeg) * c.d1;
+        c.a2 += float(kSeg) * c.d2;
+        c.a3 += float(kSeg) * c.d3;
+        gin += float(kSeg) * dgin;
+        m1 += float(kSeg) * dm1;
     }
     s[0] = va::flush(s1);
     s[1] = va::flush(s2);
 }
 
+// The input is lowered at high resonance (resoGain): the peak stays near
+// the level of the open filter.
 void filterPass(float* x, float* s, int type, float g0, float k0, float g1, float k1) {
-    if (type == kLp24) svfLowPass(x, s, svfRamp(g0, kStage1K, g1, kStage1K));
+    float gin = resoGain(k0);
+    float dgin = (resoGain(k1) - gin) * kInvBlock;
+    if (type == kLp24) {
+        svfLowPass(x, s, svfRamp(g0, kStage1K, g1, kStage1K), gin, dgin);
+        gin = 1.0f;
+        dgin = 0.0f;
+    }
     float m0 = 0.0f, m1 = 0.0f, dm1 = 0.0f, m2 = 1.0f;
     if (type == kBp12) {
         m1 = 1.0f;
@@ -440,28 +521,34 @@ void filterPass(float* x, float* s, int type, float g0, float k0, float g1, floa
         dm1 = (k0 - k1) * kInvBlock;
         m2 = -1.0f;
     }
-    svfStage(x, s + 2, svfRamp(g0, k0, g1, k1), m0, m1, dm1, m2);
+    svfStage(x, s + 2, svfRamp(g0, k0, g1, k1), m0, m1, dm1, m2, gin, dgin);
 }
 
 // ---------------------------------------------------------------------------
 // Drive: 2^(4 d) into the curve, 2^(-2.4 d) after it.
 
+// Fold shares Hard's clamp: one fold back at +-1 (unity slope at 0), held at
+// -+1 past +-3.
 inline float fold(float x) {
-    const float t0 = (clampf(x, -250.0f, 250.0f) + 1.0f) * 0.25f + 64.0f;
-    const float t = t0 - float(int(t0));
-    return 1.0f - 4.0f * absf(t - 0.5f);
+    const float h = clampf(x, -1.0f, 1.0f);
+    return clampf(h + h - x, -1.0f, 1.0f);
 }
 
+// The curve comes in over the first 5 % of Drive (wet = min(1, 20 d)), so
+// Drive tends to no Drive at 0.
 template <int kC>
 void drivePass(float* x, float d0, float d1) {
     float gi = fastExp2(kDriveIn * d0), go = fastExp2(kDriveOut * d0);
     const float dgi = (fastExp2(kDriveIn * d1) - gi) * kInvBlock, dgo = (fastExp2(kDriveOut * d1) - go) * kInvBlock;
+    float wet = clampf(kDriveWet * d0, 0.0f, 1.0f);
+    const float dwet = (clampf(kDriveWet * d1, 0.0f, 1.0f) - wet) * kInvBlock;
     for (uint32_t i = 0; i < kBlock; ++i) {
-        const float u = gi * x[i];
-        const float y = kC == kSoft ? va::tanhR(u) : (kC == kHard ? clampf(u, -1.0f, 1.0f) : fold(u));
-        x[i] = go * y;
+        const float in = x[i], u = gi * in;
+        const float y = go * (kC == kSoft ? va::tanhR(u) : (kC == kHard ? clampf(u, -1.0f, 1.0f) : fold(u)));
+        x[i] = in + wet * (y - in);
         gi += dgi;
         go += dgo;
+        wet += dwet;
     }
 }
 using DriveFn = void (*)(float*, float, float);
@@ -494,13 +581,14 @@ void outMix(const float* x, const float* y, MixRamp m, float* L, float* R) {
     }
 }
 
-// Split: x (filter 1) at pan -w, y (filter 2, may be absent) at +w.
+// Split: x (filter 1) on the left, y (filter 2, may be absent) on the right,
+// each at 1 - w on the other side (w = 0: the mono sum, at Parallel's level).
 void outSplit(const float* x, const float* y, MixRamp m, float w, float dw, float* L, float* R) {
     for (uint32_t i = 0; i < kBlock; ++i) {
-        const float hp = 0.5f + 0.5f * w, hm = 0.5f - 0.5f * w;
+        const float far = 1.0f - w;   // each side's share on the other channel
         const float xa = m.wa * m.a * x[i], yb = y ? m.wb * m.a * y[i] : 0.0f;
-        L[i] += xa * hp + yb * hm;
-        R[i] += xa * hm + yb * hp;
+        L[i] += xa + yb * far;
+        R[i] += xa * far + yb;
         m.wa += m.dwa;
         m.wb += m.dwb;
         m.a += m.da;
@@ -522,13 +610,10 @@ VT_PER_BLOCK float lfoShape(int wave, float ph, float hold) {
     }
 }
 
-// The colour one-pole's coefficient and mode (-1 low pass, +1 high pass, 0 white).
-inline float colourCoef(float c, int& mode) {
-    mode = c < 0.0f ? -1 : (c > 0.0f ? 1 : 0);
-    const float a = absf(c);
-    const float oct = c < 0.0f ? -a * 4.7369655f : a * 4.7369655f;   // log2(8000 / 300)
-    const float hz = (c < 0.0f ? kColourHi : kColourLo) * fastExp2(oct);
-    return va::onePole(hz);
+// The colour one-pole's coefficient at Colour c (its sign picks the mode).
+inline float colourCoef(float c) {
+    const float a = absf(c) * 4.7369655f;   // log2(8000 / 300)
+    return va::onePole(c < 0.0f ? kColourHi * fastExp2(-a) : kColourLo * fastExp2(a));
 }
 
 // ---------------------------------------------------------------------------
@@ -540,7 +625,9 @@ public:
 
     void slotReset(SynthSlotScratch& sc) override {
         std::memset(sc.bytes, 0, sizeof(sc.bytes));
-        sc.as<SlotState>().rng = 0x6C8E9CF5u;
+        SlotState& S = sc.as<SlotState>();
+        S.rng = 0x6C8E9CF5u;
+        for (Lfo& l : S.lfo) l.hold = va::lcg(S.rng);   // S&H holds a value from the start
     }
 
     void setTempo(float bpm) override {
@@ -757,9 +844,13 @@ VT_PER_BLOCK bool VtypeEngine::render(SynthVoice& v, const SynthParams& p, float
     if (S.noise[0] > 0.0f || S.noise[1] > 0.0f) {
         if (!hasB) std::memset(B, 0, sizeof B);
         hasB = true;
-        int m0, m1;
-        const float a0 = colourCoef(S.colour[0], m0), a1 = colourCoef(S.colour[1], m1);
-        noisePass(B, V, m1, S.noise[0], (S.noise[1] - S.noise[0]) * kInvBlock, a0, (a1 - a0) * kInvBlock);
+        // The block's mode and coefficient are its end's; a start on the other side of 0 starts dry.
+        const float c0 = S.colour[0], c1 = S.colour[1];
+        const int mode = c1 < 0.0f ? -1 : (c1 > 0.0f ? 1 : (c0 < 0.0f ? -1 : (c0 > 0.0f ? 1 : 0)));
+        const float ce = c1 != 0.0f ? c1 : c0;
+        const float w0 = (c0 < 0.0f) == (mode < 0) && c0 != 0.0f ? clampf(absf(c0) * kColourWet, 0.0f, 1.0f) : 0.0f;
+        const float w1 = c1 != 0.0f ? clampf(absf(c1) * kColourWet, 0.0f, 1.0f) : 0.0f;
+        noisePass(B, V, mode, S.noise[0], (S.noise[1] - S.noise[0]) * kInvBlock, colourCoef(ce), w0, (w1 - w0) * kInvBlock);
     }
 
     // 5. routing and output.
@@ -788,7 +879,7 @@ VT_PER_BLOCK bool VtypeEngine::render(SynthVoice& v, const SynthParams& p, float
     m.dwa = (wa1 - wa0) * kInvBlock;
     m.wb = wb0;
     m.dwb = (wb1 - wb0) * kInvBlock;
-    const bool useA = wa0 > 0.0f || wa1 > 0.0f, useB = wb0 > 0.0f || wb1 > 0.0f;
+    const bool useA = wa0 > 0.0f || wa1 > 0.0f;
     switch (route) {
         case kSingle:
             filterPass(A, f1, S.t1, d0.fg[0], d0.fk[0], d1.fg[0], d1.fk[0]);
@@ -804,13 +895,11 @@ VT_PER_BLOCK bool VtypeEngine::render(SynthVoice& v, const SynthParams& p, float
             else outMono(A, m.a, m.da, L, R);
             break;
         case kParallel:
-            if (useB) std::memcpy(T, A, sizeof T);
-            else std::memset(T, 0, sizeof T);
-            if (useA) {
-                filterPass(A, f1, S.t1, d0.fg[0], d0.fk[0], d1.fg[0], d1.fk[0]);
-                if (drive) kDriveFns[S.curve](A, d0.drive, d1.drive);
-            }
-            if (useB) filterPass(T, f2, S.t2, d0.fg[1], d0.fk[1], d1.fg[1], d1.fk[1]);
+            // Both filters run at any weight: one brought in later has no stale state.
+            std::memcpy(T, A, sizeof T);
+            filterPass(A, f1, S.t1, d0.fg[0], d0.fk[0], d1.fg[0], d1.fk[0]);
+            if (drive) kDriveFns[S.curve](A, d0.drive, d1.drive);
+            filterPass(T, f2, S.t2, d0.fg[1], d0.fk[1], d1.fg[1], d1.fk[1]);
             outMix(A, T, m, L, R);
             break;
         default:   // Split
