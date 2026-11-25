@@ -13,9 +13,10 @@ extern const SynthDescriptor kSixtypeDescriptor;   // sixtype_desc.cpp
 
 namespace {
 
-// sram_audio_bytes: the sine table (sixtype_tables.h gSixtypeSin).
+// sram_audio_bytes (as module.toml): the .bss, the sine table (sixtype_tables.h
+// gSixtypeSin, 4,100 B) + 8 voices x 252 B (sixtype.cpp gVoices) = 6,116 B.
 const ModuleInfo kInfo = {"6TY1", kModuleApi, 100, "6-Type synth", kCapSynthEngine | kCapSynthDescriptor,
-                          4100, 0, 0, 22000, 8};
+                          6116, 0, 0, 22000, 8};
 
 class Module final : public IModule {
 public:

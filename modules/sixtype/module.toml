@@ -12,7 +12,7 @@ sources = ["sixtype.cpp", "sixtype_tables.cpp", "sixtype_patch.cpp", "sixtype_de
 tests   = ["engine_sixtype_test.cpp"]
 
 flash_max_bytes   = 19500
-sram_audio_bytes  = 6120              # the sine table (sixtype_tables.h gSixtypeSin) + 8 voices x 252 B (sixtype.cpp gVoices)
+sram_audio_bytes  = 6116              # .bss: the sine table (sixtype_tables.h gSixtypeSin, 4,100 B) + 8 voices x 252 B (sixtype.cpp gVoices)
 sdram_bytes       = 0
 fastrun_bytes     = 0
 cpu_insn_per_unit = 22000             # bench limit per voice (algorithm 4 / 6 feedback chain)

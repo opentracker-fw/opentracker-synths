@@ -263,17 +263,19 @@ TEST(sixtype_sine_table_built_at_boot_matches_the_stored_one) {
 
 TEST(sixtype_parse_single_voice) {
     const Voice v = fmVoice(4, 5);
-    uint8_t out[1][sixtype::kVoiceBytes];
-    bool ok = false;
+    uint8_t out[sixtype::kVoiceBytes];
     const auto d = singleDump(v);
     CHECK_EQ(d.size(), size_t(163));
-    CHECK_EQ(sixtype::parseSysex(d.data(), d.size(), out, 1, &ok), 1);
-    CHECK(ok);
-    CHECK(std::memcmp(out[0], v.data(), sixtype::kVoiceBytes) == 0);
-    // A wrong checksum still loads (some hardware dumps carry one) but is reported.
+    CHECK_EQ(sixtype::sysexVoiceCount(d.data(), d.size()), 1);
+    CHECK(sixtype::sysexVoice(d.data(), d.size(), 0, out));
+    CHECK(std::memcmp(out, v.data(), sixtype::kVoiceBytes) == 0);
+    CHECK(!sixtype::sysexVoice(d.data(), d.size(), 1, out));
+    CHECK(!sixtype::sysexVoice(d.data(), d.size(), -1, out));
+    // A wrong checksum still loads (some hardware dumps carry one).
     const auto bad = singleDump(v, false);
-    CHECK_EQ(sixtype::parseSysex(bad.data(), bad.size(), out, 1, &ok), 1);
-    CHECK(!ok);
+    CHECK_EQ(sixtype::sysexVoiceCount(bad.data(), bad.size()), 1);
+    CHECK(sixtype::sysexVoice(bad.data(), bad.size(), 0, out));
+    CHECK(std::memcmp(out, v.data(), sixtype::kVoiceBytes) == 0);
 }
 
 TEST(sixtype_parse_bank) {
@@ -289,25 +291,32 @@ TEST(sixtype_parse_bank) {
     }
     const auto d = bankDump(voices);
     CHECK_EQ(d.size(), size_t(4104));
-    static uint8_t out[sixtype::kBankVoices][sixtype::kVoiceBytes];
-    bool ok = false;
-    CHECK_EQ(sixtype::parseSysex(d.data(), d.size(), out, sixtype::kBankVoices, &ok), 32);
-    CHECK(ok);
-    for (int i = 0; i < sixtype::kBankVoices; ++i)
-        CHECK(std::memcmp(out[i], voices[size_t(i) % 4].data(), sixtype::kVoiceBytes) == 0);
-    // maxVoices limits the output.
-    CHECK_EQ(sixtype::parseSysex(d.data(), d.size(), out, 5, &ok), 5);
+    CHECK_EQ(sixtype::sysexVoiceCount(d.data(), d.size()), 32);
+    uint8_t out[sixtype::kVoiceBytes];
+    for (int i = 0; i < sixtype::kBankVoices; ++i) {
+        CHECK(sixtype::sysexVoice(d.data(), d.size(), i, out));
+        CHECK(std::memcmp(out, voices[size_t(i) % 4].data(), sixtype::kVoiceBytes) == 0);
+    }
+    CHECK(!sixtype::sysexVoice(d.data(), d.size(), 32, out));
+    // A wrong bank checksum still loads.
+    auto bad = d;
+    bad[6 + 4096] = uint8_t((bad[6 + 4096] + 1) & 0x7f);
+    CHECK(sixtype::sysexVoice(bad.data(), bad.size(), 3, out));
+    CHECK(std::memcmp(out, voices[3].data(), sixtype::kVoiceBytes) == 0);
 }
 
 TEST(sixtype_parse_rejects_other_data) {
-    static uint8_t out[sixtype::kBankVoices][sixtype::kVoiceBytes];
+    uint8_t out[sixtype::kVoiceBytes];
     const uint8_t junk[] = {0xF0, 0x41, 0x10, 0x42, 0x12, 0x00, 0xF7};   // another maker's dump
-    CHECK_EQ(sixtype::parseSysex(junk, sizeof junk, out, 32), 0);
+    CHECK_EQ(sixtype::sysexVoiceCount(junk, sizeof junk), 0);
+    CHECK(!sixtype::sysexVoice(junk, sizeof junk, 0, out));
     auto d = singleDump(sineVoice());
-    CHECK_EQ(sixtype::parseSysex(d.data(), 100, out, 32), 0);   // truncated
+    CHECK_EQ(sixtype::sysexVoiceCount(d.data(), 100), 0);   // truncated
+    const auto bank = bankDump({sineVoice()});
+    CHECK_EQ(sixtype::sysexVoiceCount(bank.data(), 4000), 0);
     d[3] = 0x05;                                              // another format
-    CHECK_EQ(sixtype::parseSysex(d.data(), d.size(), out, 32), 0);
-    CHECK_EQ(sixtype::parseSysex(nullptr, 0, out, 32), 0);
+    CHECK_EQ(sixtype::sysexVoiceCount(d.data(), d.size()), 0);
+    CHECK_EQ(sixtype::sysexVoiceCount(nullptr, 0), 0);
 }
 
 TEST(sixtype_sanitize_clamps_ranges) {
@@ -324,12 +333,18 @@ TEST(sixtype_sanitize_clamps_ranges) {
     CHECK_EQ(int(v[144]), 48);
     CHECK_EQ(int(v[146]), int(' '));
     CHECK_EQ(sixtype::sanitizeVoice(v.data()), 0);
-    // A voice with every byte at 127 loads and plays (parseSysex sanitises).
+    // A voice with every byte at 127 loads and plays (sysexVoice sanitises).
     Voice j(sixtype::kVoiceBytes, 127);
     auto d = singleDump(j);
-    uint8_t out[1][sixtype::kVoiceBytes];
-    CHECK_EQ(sixtype::parseSysex(d.data(), d.size(), out, 1), 1);
-    Rig rig(Voice(out[0], out[0] + sixtype::kVoiceBytes));
+    uint8_t out[sixtype::kVoiceBytes];
+    CHECK(sixtype::sysexVoice(d.data(), d.size(), 0, out));
+    CHECK_EQ(sixtype::sanitizeVoice(out), 0);
+    // setVoice sanitises too (a patch's voice is not checked on the way in).
+    Rig raw(j);
+    raw.on(0, 60.0f);
+    raw.run(kBlocksPerSec / 4);
+    CHECK(finite(raw.L));
+    Rig rig(Voice(out, out + sixtype::kVoiceBytes));
     rig.on(0, 60.0f);
     rig.run(kBlocksPerSec / 2);
     CHECK(finite(rig.L));
@@ -476,6 +491,28 @@ TEST(sixtype_mono_legato_overlap_moves_pitch_only) {
     rig.on(0, 60.0f, 1.0f, true, false);
     rig.run(1);
     CHECK(rig.v[0].level >= released * 0.5f);
+}
+
+TEST(sixtype_mono_legato_reattack_keeps_the_phase) {
+    // Legato, a note after a release while the voice still sounds (key sync
+    // on): the operators run on from their phase, so the wave rises back to
+    // full level without a step larger than the held note's; a phase reset
+    // under the sounding release tail is a click. Several release lengths,
+    // so the re-attack lands at different phases.
+    for (int blocks : {3, 4, 5, 7}) {
+        Rig rig(sineVoice());
+        rig.set(kSixtypeMono, 1.0f);
+        rig.on(0, 60.0f);
+        rig.run(kBlocksPerSec / 2);
+        const float held = maxStep(rig.L, rig.L.size() - kBlock, rig.L.size());
+        rig.off(0);
+        rig.run(blocks);
+        const size_t at = rig.L.size();
+        CHECK(peak(rig.L, at - kBlock, at) > 0.05f);   // still sounding
+        rig.on(0, 60.0f, 1.0f, true, false);
+        rig.run(2);
+        CHECK(maxStep(rig.L, at - 1, at + 2 * kBlock) <= held * 1.1f);
+    }
 }
 
 // Brightness of one rendering of `voice` at note 48 with control i = x.
@@ -757,12 +794,13 @@ TEST(sixtype_syx_directory) {
         if (ent.path().extension() != ".syx") continue;
         std::ifstream in(ent.path(), std::ios::binary);
         std::vector<uint8_t> d((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        static uint8_t out[sixtype::kBankVoices][sixtype::kVoiceBytes];
-        const int n = sixtype::parseSysex(d.data(), d.size(), out, sixtype::kBankVoices);
+        const int n = sixtype::sysexVoiceCount(d.data(), d.size());
         CHECK(n > 0);
         ++files;
         for (int i = 0; i < n; ++i, ++voices) {
-            Rig rig(Voice(out[i], out[i] + sixtype::kVoiceBytes));
+            uint8_t out[sixtype::kVoiceBytes];
+            CHECK(sixtype::sysexVoice(d.data(), d.size(), i, out));
+            Rig rig(Voice(out, out + sixtype::kVoiceBytes));
             for (int k = 0; k < 3; ++k) rig.on(k, 48.0f + 12.0f * float(k), 0.8f);
             rig.run(kBlocksPerSec);
             for (int k = 0; k < 3; ++k) rig.off(k);

@@ -46,15 +46,11 @@ constexpr int kNameLen = 10;
 // Bank entry (128 bytes, packed) -> single voice (155 bytes).
 void unpackVoice(const uint8_t packed[kPackedBytes], uint8_t out[kVoiceBytes]);
 
-// A SysEx file's voices. Accepts a single-voice dump (163 bytes) or a 32-voice
-// bank (4104 bytes); with or without valid checksums (checksumOk reports).
-// Returns the number of voices written to out (0: not a voice dump).
-int parseSysex(const uint8_t* data, size_t len, uint8_t out[][kVoiceBytes], int maxVoices,
-               bool* checksumOk = nullptr);
-
-// The same files, one voice at a time (the Load Patch browser): the voices in
-// the file (1, 32, or 0: not a voice dump), and voice k (unpacked, sanitized)
-// into out (false past the end).
+// A SysEx file's voices, one at a time (the Load Patch browser): a
+// single-voice dump (163 bytes) or a 32-voice bank (4104 bytes), with or
+// without a valid checksum (not checked). The voices in the file (1, 32, or
+// 0: not a voice dump), and voice k (unpacked, sanitized) into out (false
+// past the end).
 int sysexVoiceCount(const uint8_t* data, size_t len);
 bool sysexVoice(const uint8_t* data, size_t len, int k, uint8_t out[kVoiceBytes]);
 

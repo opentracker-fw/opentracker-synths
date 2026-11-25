@@ -574,6 +574,9 @@ public:
             ol = ol * 32 + scaleVelocity(velocity, od[kOpVelSens]);
             e.outlevel = int16_t(ol < 0 ? 0 : ol);
             e.rateScale = int8_t(scaleRate(note, od[kOpRateScale]));
+            // A new voice starts at phase 0. A reused one (Retrigger, or
+            // Legato after a release) is still sounding: its phase runs on
+            // even with key sync (a reset under a loud operator is a click).
             if (newVoice) {
                 e.level = 0;
                 o.gain = 0;
@@ -582,11 +585,7 @@ public:
                 // Retrigger on the sounding voice: the envelopes restart from
                 // 0 but the gains keep their last value, so each operator
                 // ramps down over the next control step instead of clicking.
-                // The phase runs on even with key sync (resetting it under a
-                // loud operator is the click itself).
                 e.level = 0;
-            } else if (s.v[kKeySync]) {
-                o.phase = 0;
             }
             envAdvance(e, 0);
         }
@@ -786,35 +785,10 @@ int sanitizeVoice(uint8_t v[kVoiceBytes]) {
     return changed;
 }
 
-int parseSysex(const uint8_t* d, size_t len, uint8_t out[][kVoiceBytes], int maxVoices, bool* checksumOk) {
-    auto checksum = [](const uint8_t* p, size_t n) {
-        unsigned sum = 0;
-        for (size_t i = 0; i < n; ++i) sum += p[i];
-        return uint8_t((128 - (sum & 0x7f)) & 0x7f);
-    };
-    if (checksumOk) *checksumOk = true;
-    if (len < 6 || d[0] != 0xF0 || d[1] != 0x43 || (d[2] & 0xF0) != 0) return 0;
-    if (d[3] == 0x00 && d[4] == 0x01 && d[5] == 0x1B && len >= 6 + kVoiceBytes + 2) {
-        if (maxVoices < 1) return 0;
-        std::memcpy(out[0], d + 6, kVoiceBytes);
-        if (checksumOk) *checksumOk = checksum(d + 6, kVoiceBytes) == d[6 + kVoiceBytes];
-        sanitizeVoice(out[0]);
-        return 1;
-    }
-    if (d[3] == 0x09 && d[4] == 0x20 && d[5] == 0x00 && len >= 6 + 4096 + 2) {
-        if (checksumOk) *checksumOk = checksum(d + 6, 4096) == d[6 + 4096];
-        const int n = maxVoices < kBankVoices ? maxVoices : kBankVoices;
-        for (int i = 0; i < n; ++i) {
-            unpackVoice(d + 6 + i * kPackedBytes, out[i]);
-            sanitizeVoice(out[i]);
-        }
-        return n;
-    }
-    return 0;
-}
-
+// The checksum byte is not checked: a dump with a wrong one still loads,
+// every value clamped to its range (sanitizeVoice).
 int sysexVoiceCount(const uint8_t* d, size_t len) {
-    if (len < 6 || d[0] != 0xF0 || d[1] != 0x43 || (d[2] & 0xF0) != 0) return 0;
+    if (!d || len < 6 || d[0] != 0xF0 || d[1] != 0x43 || (d[2] & 0xF0) != 0) return 0;
     if (d[3] == 0x00 && d[4] == 0x01 && d[5] == 0x1B && len >= 6 + kVoiceBytes + 2) return 1;
     if (d[3] == 0x09 && d[4] == 0x20 && d[5] == 0x00 && len >= 6 + 4096 + 2) return kBankVoices;
     return 0;
@@ -832,8 +806,12 @@ bool sysexVoice(const uint8_t* d, size_t len, int k, uint8_t out[kVoiceBytes]) {
 void setVoice(SynthSlotScratch& slot, const uint8_t v[kVoiceBytes]) {
     static_assert(sizeof(Slot) <= kSynthSlotScratchBytes, "6-Type slot state too large");
     Slot& s = slot.as<Slot>();
-    std::memcpy(s.v, v, kVoiceBytes);
-    sanitizeVoice(s.v);
+    // Sanitised before it reaches the slot: a block rendered in between
+    // never reads an out-of-range byte.
+    uint8_t clean[kVoiceBytes];
+    std::memcpy(clean, v, kVoiceBytes);
+    sanitizeVoice(clean);
+    std::memcpy(s.v, clean, kVoiceBytes);
     s.algorithm = s.v[kAlgorithm];
     s.fbCarrier = false;
     for (int k = 0; k < 6; ++k)
