@@ -23,6 +23,7 @@ not identical to them.
 | `modules/arc` | ARC1 | Arc-Type ("Arc-Type" on screen): a home-console 4-operator FM style voice: eight algorithms, feedback, per operator MUL / DT / Level / Rate Scaling / a 5-rate envelope with loop modes / AMS, an LFO (PMS, AMS), a 9-bit DAC with a ladder character, an Aux square / noise voice, the CHIP arp and slide (module engine 0x89, Patches/ARCTYPE/) |
 | `modules/onetype` | 1TY1 | 1-Type ("1-Type" on screen): a two-oscillator voice in the style of a classic freeware softsynth, based on Oxo Synth2 (MIT): osc 1 (sine, saw, pulse, triangle, two detuned copies, FM from osc 2, a sub locked to it), osc 2 (saw, pulse, triangle, noise; sync, ring, key track), LP12 / LP24 / HP12 / BP12 / LPDL (as LP24) with its envelope, saturation and the output limiter, a mod envelope, two LFOs per slot (seven destinations, tempo and key sync), glide; a card module of Full; .sy1 patches convert with the core's tools/sy1_to_patch (module engine 0x8A, Patches/1TYPE/) |
 | `modules/vtype` | VTY1 | V-Type ("V-Type" on screen): a swarm-oscillator virtual analog voice in the style of the late-90s desktop VA synths: the Swarm (1 / 3 / 5 / 7 detuned saws, Swarm Mix, a locked sub), osc 2 (saw / pulse / triangle / sine, sync, ring), coloured noise, two filters (LP12 / LP24 / BP12 / HP12) with Drive between them routed Single / Serial / Parallel / Split, three envelopes, two LFOs, a 4-slot matrix, glide (module engine 0x8B, Patches/VTYPE/) |
+| `modules/sixtype` | 6TY1 | 6-Type ("6-Type" on screen): six-operator FM, 32 algorithms; reads 32-voice (4104 B) and single-voice (163 B) `.syx` voice dumps (Load Patch lists them, Patches/6TYPE/); derived from msfa, Apache 2.0 (module engine 0x8C) |
 
 ## How modules work
 
@@ -59,4 +60,6 @@ or `make image` / `make test` here (`CORE=<path to reimpl>`).
 - Only core headers: `modules/module.h`, `audio/synth_engine.h`, `audio/dsp.h`, `audio/va_dsp.h`,
   `audio/chip_dsp.h`, `audio/fm_dsp.h`, `fastrun.h` (the full list is in the core's `modules/module.h`).
 
-License: MIT (LICENSE). Contains no Polyend code.
+License: MIT (LICENSE), except `modules/sixtype`, which is derived from Google's Music
+Synthesizer for Android (msfa) and stays under the Apache License 2.0
+(`modules/sixtype/msfa.txt`). Contains no Polyend code.
