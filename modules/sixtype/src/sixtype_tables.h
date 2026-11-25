@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // 6-Type engine lookup tables (generated: modules/sixtype/tools/make_sixtype_tables.py) [OT].
 #pragma once
 

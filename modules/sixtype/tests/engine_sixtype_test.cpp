@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // 6-Type engine (modules/sixtype): SysEx parsing (single voice,
 // 32-voice bank, bad checksums, junk), bank unpacking, range clamping, the
 // note's pitch (ratio, fixed frequency, transpose, bend), velocity

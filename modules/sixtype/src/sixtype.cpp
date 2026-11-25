@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // 6-Type six-operator FM engine (see sixtype.h) [OT].
 //
 // Derived from msfa (Music Synthesizer for Android), Copyright 2012-2013

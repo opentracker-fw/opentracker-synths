@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # OpenTracker module manifest (core: tools/profile.py): the 6-Type engine,
 # six-operator FM playing .syx voice dumps. Derived from msfa (Apache 2.0,
 # msfa.txt in this folder).

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // 6-Type synth module (6TY1) [OT]: the 6-Type engine (sixtype.h), engine id 0x8C, in
 // the Synth page model list after the Tracker Mini models (modules/module.h).
 #include "sixtype.h"

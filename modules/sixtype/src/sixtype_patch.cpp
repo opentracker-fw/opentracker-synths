@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // 6-Type patch data (sixtype_patch.h) [OT].
 #include "sixtype_patch.h"
 

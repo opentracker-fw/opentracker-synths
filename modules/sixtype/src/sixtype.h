@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // 6-Type: a six-operator FM engine, 32 algorithms, that plays .syx voice
 // dumps (32-voice banks of 4104 B, single voices of 163 B) [OT].
 //

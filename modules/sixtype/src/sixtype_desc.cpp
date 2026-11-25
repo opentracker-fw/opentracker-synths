@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // 6-Type synth descriptor (modules/synth_descriptor.h) [OT]: the controls on top
 // of the loaded voice, the Init patch's voice and macros, and the .syx banks
 // in Load Patch. Patches/6TYPE/, "6-Type" on the Synth page.

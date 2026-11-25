@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // 6-Type patch data [OT]: the voice a 6-Type patch carries and the engine's own
 // controls (indices into the patch's params).
 //
