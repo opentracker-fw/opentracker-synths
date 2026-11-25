@@ -1,10 +1,10 @@
 msfa (Music Synthesizer for Android, https://github.com/google/music-synthesizer-for-android)
 Copyright 2012-2013 Google Inc.
-Used by the DX7 module (modules/dx7): the FM engine (src/dx7.cpp) is derived from
-msfa's dx7note.cc, env.cc, pitchenv.cc, lfo.cc, fm_core.cc, fm_op_kernel.cc and patch.cc;
-the tables in src/dx7_tables.cpp are generated with the recipes of its sin.cc, exp2.cc
-and freqlut.cc (tools/make_dx7_tables.py). The changes are listed at the top of
-src/dx7.h / src/dx7.cpp.
+Used by the 6-Type module (modules/sixtype): the FM engine (src/sixtype.cpp) is derived
+from msfa's dx7note.cc, env.cc, pitchenv.cc, lfo.cc, fm_core.cc, fm_op_kernel.cc and
+patch.cc (msfa's own file names); the tables in src/sixtype_tables.cpp are generated with
+the recipes of its sin.cc, exp2.cc and freqlut.cc (tools/make_sixtype_tables.py). The
+changes are listed at the top of src/sixtype.h / src/sixtype.cpp.
 
 
                                  Apache License

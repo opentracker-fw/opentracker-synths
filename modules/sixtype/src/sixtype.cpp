@@ -1,37 +1,37 @@
-// DX7 6-operator FM engine (see dx7.h) [OT].
+// 6-Type six-operator FM engine (see sixtype.h) [OT].
 //
 // Derived from msfa (Music Synthesizer for Android), Copyright 2012-2013
 // Google Inc., Licensed under the Apache License, Version 2.0 (the
 // "License"); you may not use this file except in compliance with the
 // License. You may obtain a copy of the License at
-// http://www.apache.org/licenses/LICENSE-2.0 (modules/dx7/msfa.txt).
+// http://www.apache.org/licenses/LICENSE-2.0 (modules/sixtype/msfa.txt).
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
 // WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 // License for the specific language governing permissions and limitations
 // under the License.
 //
-// Changed from msfa (dx7note.cc, env.cc, pitchenv.cc, lfo.cc, fm_core.cc,
-// fm_op_kernel.cc, patch.cc): merged into one engine for the synth framework,
+// Changed from msfa (its note, env, pitchenv, lfo, fm_core, fm_op_kernel and
+// patch sources, listed in msfa.txt): merged into one engine for the synth framework,
 // compact state, flash tables, float pitch + bend, transpose, key sync,
-// amplitude modulation, the algorithm 4 / 6 feedback loops, voice end (dx7.h).
+// amplitude modulation, the algorithm 4 / 6 feedback loops, voice end (sixtype.h).
 //
 // Units (msfa's): phases Q24 (1 << 24 = one cycle); pitches log2(Hz) in Q24;
 // envelope levels log2 gain in Q24 ("doublings"); operator outputs Q24 sines
 // x linear gain (full output level: 2^25). Envelopes, the pitch envelope, the
 // LFO and the pitch run per kN = 64 frames (msfa's N; two per block); gains
 // ramp linearly across each 64 frames.
-#include "dx7.h"
+#include "sixtype.h"
 
 #include <cmath>
 #include <cstring>
 
-#include "dx7_patch.h"
-#include "dx7_tables.h"
+#include "sixtype_patch.h"
+#include "sixtype_tables.h"
 
 namespace ot {
 namespace audio {
-namespace dx7 {
+namespace sixtype {
 
 namespace {
 
@@ -46,7 +46,7 @@ constexpr float kOutScale = 1.0f / float(1 << 27);
 // Operator gains below this are skipped (msfa kLevelThresh, ~-90 dB).
 constexpr int32_t kLevelThresh = 1120;
 
-// VCED layout: operators 6..1 (21 bytes each), then the voice parameters.
+// Single-voice layout: operators 6..1 (21 bytes each), then the voice parameters.
 enum : int {
     kOpBytes = 21,
     kOpRate = 0, kOpLevel = 4, kOpBreak = 8, kOpLDepth = 9, kOpRDepth = 10, kOpLCurve = 11,
@@ -57,14 +57,14 @@ enum : int {
     kPitchModSens = 143, kTranspose = 144, kName = 145,
 };
 
-// Largest valid value of each VCED byte.
+// Largest valid value of each single-voice byte.
 constexpr uint8_t kOpMax[kOpBytes] = {99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
                                       3,  3,  7,  3,  7,  99, 1,  31, 99, 14};
 constexpr uint8_t kVoiceMax[kVoiceBytes - 6 * kOpBytes] = {
     99, 99, 99, 99, 99, 99, 99, 99, 31, 7, 1, 99, 99, 99, 99, 1, 5, 7, 48,
     127, 127, 127, 127, 127, 127, 127, 127, 127, 127};
 
-// ---- msfa tables (dx7note.cc, env.cc, pitchenv.cc) ----------------------------
+// ---- msfa tables (note, env, pitchenv) -----------------------------------------
 
 const int32_t kCoarseMul[32] = {
     -16777216, 0, 16777216, 26591258, 33554432, 38955489, 43368474, 47099600,
@@ -132,8 +132,7 @@ const uint8_t kAlgorithms[32][6] = {
 // x = AMD x (1 - LFO) (0..1) x LFO delay x the operator's AMS scale, on the 0..99
 // AMD scale, attenuates the operator by kAmCurve(x) doublings (6 dB):
 // exponential in x, near silence at AMS 3 / AMD 99 / LFO peak. Fitted to
-// Dexed's tremolo depths (the core's tools/dx7_render compare probes), as data, not
-// code: per AMS 1/2 the depth equals AMS 3 at 0.26 / 0.44 of the AMD.
+// measured tremolo depths of reference renders, as data, not code: per AMS 1/2 the depth equals AMS 3 at 0.26 / 0.44 of the AMD.
 constexpr float kAmsScale[4] = {0.0f, 0.26f, 0.44f, 1.0f};
 constexpr float kAmCurve[11] = {0.0f, 0.1f, 0.22f, 0.47f, 0.86f, 1.43f, 2.3f, 3.75f, 6.0f, 9.6f, 12.6f};
 
@@ -181,15 +180,15 @@ int scaleCurve(int group, int depth, int curve) {
 int scaleLevel(int note, const uint8_t* op) {
     // Key groups of 3 notes from the break point; (|offset| + 1) / 3 puts the
     // group edges one note nearer the break point than msfa's |offset| / 3,
-    // matching Dexed's level scaling note for note (compare probes).
+    // matching reference renders note for note.
     const int offset = note - op[kOpBreak] - 17;
     if (offset >= 0) return scaleCurve((offset + 1) / 3, op[kOpRDepth], op[kOpRCurve]);
     return scaleCurve((1 - offset) / 3, op[kOpLDepth], op[kOpLCurve]);
 }
 
 // Ratio-mode detune per step (DET - 7) in cents, at notes 24, 36, .., 96:
-// larger at low notes (msfa: a constant ~0.9 c). Measured from Dexed
-// (compare probes); linear in DET, interpolated per note, clamped outside.
+// larger at low notes (msfa: a constant ~0.9 c). Measured from reference
+// renders; linear in DET, interpolated per note, clamped outside.
 constexpr float kDetuneCents[7] = {2.455f, 1.983f, 1.556f, 1.197f, 0.906f, 0.677f, 0.501f};
 
 // Log-frequency (Q24 octaves) per detune step at a note.
@@ -215,7 +214,7 @@ int32_t opPitch(const uint8_t* op) {
     return lf + (detune > 7 ? 13457 * (detune - 7) : 0);
 }
 
-// Engine controls on top of the voice (kDx7*, dx7_patch.h).
+// Engine controls on top of the voice (kSixtype*, sixtype_patch.h).
 constexpr float kBrightDoublings = 2.0f;   // Brightness +-1: modulators +-12 dB
 constexpr int32_t kLevelMax = 16 << 24;    // envelope level cap (exp2Lookup: <= 4x full gain)
 constexpr float kRateRange = 50.0f;        // Attack / Release +-1: EG rate -+50 steps (of 0..99)
@@ -288,8 +287,8 @@ Voice& voiceOf(SynthVoice& v) { return gVoices[v.index < kSynthMaxVoices ? v.ind
 inline float control(const SynthParams& p, int i, float def) { return i < p.count ? p.end[i] : def; }
 
 // Feedback shift (msfa: 8 - fb). Where the loop's last operator is a carrier
-// (algorithms 4, 6, 32), two steps (x 1/4) weaker: matches Dexed's spectra
-// for those algorithms (the core's tools/dx7_render compare probes).
+// (algorithms 4, 6, 32), two steps (x 1/4) weaker: matches the spectra of
+// reference renders for those algorithms.
 uint8_t feedbackShift(int fb, bool carrier) { return uint8_t(fb > 0 ? 8 - fb + (carrier ? 2 : 0) : 16); }
 
 // EG rate with a control offset (rate steps), inside 0..99.
@@ -392,9 +391,9 @@ int32_t delayStep(Voice& x, const Slot& s) {
 
 // The per-sample loops run unrolled (loop overhead is ~20 % of a kernel).
 #if defined(__GNUC__) && !defined(__clang__)
-#define DX7_UNROLL _Pragma("GCC unroll 4")
+#define SIXTYPE_UNROLL _Pragma("GCC unroll 4")
 #else
-#define DX7_UNROLL
+#define SIXTYPE_UNROLL
 #endif
 
 // Operator output: Q24 sine x gain >> 24, as the top word of (y << 6) x
@@ -409,14 +408,14 @@ void opKernel(int32_t* out, const int32_t* in, uint32_t phase, uint32_t freq, in
     int32_t gain = g1 * 4;
     if (in) {
         if (add) {
-            DX7_UNROLL
+            SIXTYPE_UNROLL
             for (int i = 0; i < kN; ++i) {
                 gain += dgain;
                 out[i] += opOut(sinLookup(phase + uint32_t(in[i])), gain);
                 phase += freq;
             }
         } else {
-            DX7_UNROLL
+            SIXTYPE_UNROLL
             for (int i = 0; i < kN; ++i) {
                 gain += dgain;
                 out[i] = opOut(sinLookup(phase + uint32_t(in[i])), gain);
@@ -424,14 +423,14 @@ void opKernel(int32_t* out, const int32_t* in, uint32_t phase, uint32_t freq, in
             }
         }
     } else if (add) {
-        DX7_UNROLL
+        SIXTYPE_UNROLL
         for (int i = 0; i < kN; ++i) {
             gain += dgain;
             out[i] += opOut(sinLookup(phase), gain);
             phase += freq;
         }
     } else {
-        DX7_UNROLL
+        SIXTYPE_UNROLL
         for (int i = 0; i < kN; ++i) {
             gain += dgain;
             out[i] = opOut(sinLookup(phase), gain);
@@ -446,7 +445,7 @@ void fbKernel(int32_t* out, uint32_t phase, uint32_t freq, int32_t g1, int32_t g
     int32_t y0 = fb[0], y = fb[1];
     const int sh = shift + 1;
     if (add) {
-        DX7_UNROLL
+        SIXTYPE_UNROLL
         for (int i = 0; i < kN; ++i) {
             gain += dgain;
             const int32_t m = (y0 + y) >> sh;
@@ -456,7 +455,7 @@ void fbKernel(int32_t* out, uint32_t phase, uint32_t freq, int32_t g1, int32_t g
             phase += freq;
         }
     } else {
-        DX7_UNROLL
+        SIXTYPE_UNROLL
         for (int i = 0; i < kN; ++i) {
             gain += dgain;
             const int32_t m = (y0 + y) >> sh;
@@ -500,18 +499,18 @@ void chainKernel(int32_t* out, const Op* ops, const int32_t* freq, const int32_t
     fb[1] = y;
 }
 
-class Dx7Engine final : public ISynthEngine {
+class SixtypeEngine final : public ISynthEngine {
 public:
     int32_t id() const override { return kEngineId; }
-    const char* name() const override { return "DX7"; }
+    const char* name() const override { return "6TYPE"; }
 
     void slotReset(SynthSlotScratch& slot) override { std::memset(&slot.as<Slot>(), 0, sizeof(Slot)); }
 
-    // The voice of the patch (field kPatchFieldDx7Voice), else INIT VOICE.
-    static_assert(kVoiceBytes == kDx7VoiceBytes, "VCED size");
+    // The voice of the patch (field kPatchFieldSixtypeVoice), else INIT VOICE.
+    static_assert(kVoiceBytes == kSixtypeVoiceBytes, "single-voice size");
     void loadPatch(SynthSlotScratch& slot, const SynthPatch& patch) override {
         uint8_t v[kVoiceBytes];
-        patchDx7Voice(patch, v);
+        patchSixtypeVoice(patch, v);
         setVoice(slot, v);
     }
 
@@ -520,15 +519,15 @@ public:
     // prepare only runs while the slot sounds).
     void prepare(SynthSlotScratch& slot, const SynthParams& p) override {
         Slot& s = slot.as<Slot>();
-        const int fb = clampT(int(s.v[kFeedback]) + int(std::lround(control(p, kDx7Feedback, 0.0f))), 0, 7);
+        const int fb = clampT(int(s.v[kFeedback]) + int(std::lround(control(p, kSixtypeFeedback, 0.0f))), 0, 7);
         s.fbShift = feedbackShift(fb, s.fbCarrier);
-        const float depth = clampT(control(p, kDx7LfoDepth, 1.0f), 0.0f, 2.0f);
-        // At most the DX7's full depth (PMD 99 = 255): render's 32-bit
+        const float depth = clampT(control(p, kSixtypeLfoDepth, 1.0f), 0.0f, 2.0f);
+        // At most the full depth (PMD 99 = 255): render's 32-bit
         // product PMD x LFO delay has no room above it.
         s.pitchModDepth = clampT(int32_t(float((s.v[kLfoPmd] * 165) >> 6) * depth), int32_t(0), int32_t(255));
         s.amDepth = float(s.v[kLfoAmd]) * depth;
-        s.bright = int32_t(control(p, kDx7Brightness, 0.0f) * kBrightDoublings * float(1 << 24));
-        const float spread = control(p, kDx7Detune, 0.0f) * kSpreadCents * (float(1 << 24) / 1200.0f);
+        s.bright = int32_t(control(p, kSixtypeBrightness, 0.0f) * kBrightDoublings * float(1 << 24));
+        const float spread = control(p, kSixtypeDetune, 0.0f) * kSpreadCents * (float(1 << 24) / 1200.0f);
         for (int k = 0; k < 6; ++k) s.spread[k] = (s.fixedMask >> k) & 1 ? 0 : int32_t(spread * kSpreadPattern[k]);
         for (int k = 0; k < kSteps; ++k) s.lfo[k] = lfoStep(s);
         s.keyed = false;
@@ -550,7 +549,7 @@ public:
         }
         const int transpose = int(s.v[kTranspose]) - 24;
         const int note = clampT(int(n.note) + transpose, 0, 127);
-        const bool legato = control(p, kDx7Mono, 0.0f) >= 0.5f;
+        const bool legato = control(p, kSixtypeMono, 0.0f) >= 0.5f;
         if (legato && x.alive && n.reused && n.overlap && x.down) {
             x.pitch = n.pitch + float(transpose);
             x.detuneStep = detuneStep(note);
@@ -559,7 +558,7 @@ public:
         const int velocity = clampT(int(n.velocity * 127.0f + 0.5f), 0, 127);
         const bool newVoice = !x.alive || !n.reused;
         const bool fresh = newVoice || !legato;   // Retrigger: a reused voice restarts too
-        const float attack = control(p, kDx7Attack, 0.0f);
+        const float attack = control(p, kSixtypeAttack, 0.0f);
         for (int k = 0; k < 6; ++k) {
             const uint8_t* od = s.v + k * kOpBytes;
             Op& o = x.op[k];
@@ -609,7 +608,7 @@ public:
         Voice& x = voiceOf(v);
         if (!x.alive || !x.down) return;
         x.down = false;
-        const float release = control(p, kDx7Release, 0.0f);
+        const float release = control(p, kSixtypeRelease, 0.0f);
         const uint8_t* vd = v.slotScratch->as<Slot>().v;
         for (int k = 0; k < 6; ++k) {
             Env& e = x.op[k].env;
@@ -640,7 +639,7 @@ public:
             const uint32_t pmd = uint32_t(s.pitchModDepth) * uint32_t(delay);
             const int32_t sensLfo = int32_t(s.pitchModSens) * (lfo - (1 << 23));
             pitchMod += int32_t((int64_t(pmd) * int64_t(sensLfo)) >> 39);
-            // AM follows the inverted LFO (1 - lfo), as Dexed's tremolo does.
+            // AM follows the inverted LFO (1 - lfo), as the reference tremolo does.
             const float am = s.amDepth * float((1 << 24) - lfo) * float(delay) * (1.0f / float(1 << 24)) * (1.0f / float(1 << 24));   // 0..99
             for (int k = 0; k < 6; ++k) {
                 Op& o = x.op[k];
@@ -656,7 +655,7 @@ public:
                 if (s.bright && (alg[k] & 3) && gnew[k] >= kLevelThresh)
                     gnew[k] = exp2Lookup(clampT(level + s.bright, int32_t(0), kLevelMax) - (14 << 24));
                 // Fixed-frequency operators ignore the note, the pitch envelope and
-                // the LFO (as in Dexed; msfa adds the modulation to them).
+                // the LFO (as in reference renders; msfa adds the modulation to them).
                 int32_t lf = s.opPitch[k] + ((s.fixedMask >> k) & 1 ? 0 : noteLog + pitchMod + s.detune[k] * x.detuneStep + s.spread[k]);
                 freq[k] = freqLookup(clampT<int32_t>(lf, 0, (20 << 24) - 1));
             }
@@ -739,7 +738,7 @@ public:
     }
 };
 
-Dx7Engine gEngine;
+SixtypeEngine gEngine;
 
 }  // namespace
 
@@ -830,7 +829,7 @@ bool sysexVoice(const uint8_t* d, size_t len, int k, uint8_t out[kVoiceBytes]) {
 }
 
 void setVoice(SynthSlotScratch& slot, const uint8_t v[kVoiceBytes]) {
-    static_assert(sizeof(Slot) <= kSynthSlotScratchBytes, "DX7 slot state too large");
+    static_assert(sizeof(Slot) <= kSynthSlotScratchBytes, "6-Type slot state too large");
     Slot& s = slot.as<Slot>();
     std::memcpy(s.v, v, kVoiceBytes);
     sanitizeVoice(s.v);
@@ -877,6 +876,6 @@ ISynthEngine* engine() {
     return &gEngine;
 }
 
-}  // namespace dx7
+}  // namespace sixtype
 }  // namespace audio
 }  // namespace ot
