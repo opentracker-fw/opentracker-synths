@@ -11,10 +11,13 @@ caps    = ["synthEngine"]
 sources = ["sixtype.cpp", "sixtype_tables.cpp", "sixtype_patch.cpp", "sixtype_desc.cpp", "sixtype_module.cpp"]
 tests   = ["engine_sixtype_test.cpp"]
 
-flash_max_bytes   = 19500
+flash_max_bytes   = 21000             # sixtype.otm 19,256 B with its hot row (image 18,688 B)
 sram_audio_bytes  = 6116              # .bss: the sine table (sixtype_tables.h gSixtypeSin, 4,100 B) + 8 voices x 252 B (sixtype.cpp gVoices)
 sdram_bytes       = 0
 fastrun_bytes     = 0
-cpu_insn_per_unit = 22000             # bench limit per voice (algorithm 4 / 6 feedback chain)
+cpu_insn_per_unit = 23000             # bench-m4 limit per voice (sixtype.unit 21,554: the costliest of sixtype.scan, algorithm 4, six operators at 99, feedback 7, AM + PM)
 max_units         = 8
+bench             = "sixtype"
 engines           = [140]             # 0x8C: a module engine (not a Tracker Mini model)
+bench_sources     = ["sixtype_bench.cpp"]
+bench_entry       = "sixtypeBench"

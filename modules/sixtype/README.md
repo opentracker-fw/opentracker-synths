@@ -19,6 +19,16 @@ patches in `Patches/6TYPE/`, "6-Type" on the Synth page): six-operator FM, 32 al
   (modulator levels), Feedback, Attack, Release, LFO Depth and Detune; the Init patch puts
   M1-M6 on them.
 
+## Budgets
+
+| | |
+|---|---|
+| CPU | at most 23,000 M4 instructions per voice and block (`sixtype.unit` 21,554: the costliest algorithm of the `sixtype.scan` search, algorithm 4, six operators at level 99, feedback 7, AM and PM on; the cost does not depend on the pitch), 8 voices |
+| Card pool | `sixtype.otm` about 19 KB, plus 6 KB of bss: about 25 KB in the pool |
+| State | 6,116 B of bss (the sine table, 4,100 B, and 8 voices of 252 B), about 260 B of slot scratch |
+
+`bench/sixtype_bench.cpp` measures the lines; build it with `-DOT_SIXTYPE_SCAN` to run the search.
+
 ## Licence
 
 The engine and its tables are derived from msfa, Google's Music Synthesizer for Android, and are
